@@ -1,0 +1,29 @@
+# Recon Mismatch Analyzer - dependencies
+#
+#   pip install -r requirements.txt
+#
+# Needs Python 3.8 or newer (openpyxl 3.1.5 requires it). Tested on 3.9.6.
+# Everything else the scripts use is in the Python standard library.
+#
+# Covers all three scripts:
+#   recon_analyzer.py     - the analysis + Excel workbook (needs the packages below)
+#   recon_html_report.py  - runs recon_analyzer.py and adds the HTML page; no extra
+#                           packages (standard library only), but it imports
+#                           recon_analyzer.py, so it needs the same packages below
+#   test_patterns.py      - self-test, same packages
+#
+# The HTML page loads nothing from the internet - no browser add-ons or
+# network access are needed to open it.
+#
+# The Claude Code skill (claude_skill\recon-summary, installed with
+# install_skill.py) needs no Python packages of its own; it only runs
+# recon_html_report.py. See STEPS.txt Part 5.
+#
+# The last two lines are dependencies of the first two. pip installs them
+# automatically; they are pinned here so every machine gets identical versions,
+# and so an offline install (see STEPS.txt) downloads everything it needs.
+
+openpyxl==3.1.5
+python-dateutil==2.8.2
+et-xmlfile==2.0.0
+six==1.16.0

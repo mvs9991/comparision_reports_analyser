@@ -1,0 +1,8 @@
+# generated - not part of the tool
+reports/
+__pycache__/
+.venv/
+wheels/
+
+# the installed copy of the skill; the source is claude_skill/ (see install_skill.py)
+.claude/

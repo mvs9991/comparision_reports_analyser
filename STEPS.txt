@@ -1,0 +1,435 @@
+RECON MISMATCH ANALYZER - HOW TO RUN IT
+=======================================
+
+Reads your recon mismatch CSV exports and writes TWO files, side by side, both
+named after the run folder:
+
+  report_summary_<folder>.xlsx   the Excel summary workbook, with all its sheets
+                                 (Overview, Errors, Across Tables, one sheet per
+                                 table, What the terms mean)
+  report_summary_<folder>.html   the same findings as a web page - opens in any
+                                 browser, no internet needed
+
+Nothing else is left behind. All commands below are for Windows Command Prompt
+(cmd). Copy them as-is, changing only the paths shown in <angle brackets>.
+
+
+WHAT IS IN THIS FOLDER
+----------------------
+  recon_html_report.py the command you run: writes the Excel workbook AND the web page
+  recon_analyzer.py    the analysis engine (still works on its own - Excel only)
+  test_patterns.py     self-test: proves every comparison rule still behaves correctly
+  requirements.txt     the Python packages it needs (exact versions)
+  sample_input\        two small example tables, in the exact format the tool expects
+  claude_skill\recon-summary\SKILL.md
+                       the Claude Code skill (Part 5) - lets you type /recon-summary <folder>
+  install_skill.py     installs that skill into Claude Code (Part 5)
+  .gitignore           keeps generated folders (reports\, .venv\, __pycache__\) out of git
+  reports\             where reports go when you do not say otherwise (created on first
+                       run; not committed)
+  STEPS.txt            this file
+
+
+HOW THE WEB PAGE RELATES TO THE EXCEL WORKBOOK
+----------------------------------------------
+  It is ONE run, not a second pass over your data: the mismatch CSVs are read
+  once, the workbook is written, and the page is built from the same results.
+  The page and the workbook always show the same numbers, and building the page
+  adds about a second even for a large run.
+
+
+=======================================================================
+PART 1 - ONE-TIME SETUP ON A NEW LAPTOP
+=======================================================================
+
+STEP 1. Check Python is installed (3.8 or newer)
+
+    python --version
+
+  - Shows "Python 3.8" or higher  -> go to Step 2.
+  - Shows 3.7 or lower            -> install a newer Python first.
+  - Opens the Microsoft Store, or "not recognized" -> try:   py --version
+    If "py" works, type  py  instead of  python  in every command below.
+  - Neither works -> install Python 3.9+ (from your company software portal,
+    or python.org). During install, tick "Add Python to PATH".
+
+
+STEP 2. Copy this folder from Drive to the laptop
+
+  Put it somewhere with no spaces in the path if you can, for example:
+      C:\recon_analyzer
+
+  Then open Command Prompt and go into it:
+
+    cd /d C:\recon_analyzer
+
+
+STEP 3. Create a private Python environment (recommended)
+
+  Keeps these packages separate from anything else on the laptop.
+
+    python -m venv .venv
+    .venv\Scripts\activate
+
+  Your prompt now starts with (.venv). You must run the "activate" line again
+  each time you open a new Command Prompt window (see Part 2).
+
+  If your company blocks this, skip Step 3 - everything still works without it.
+
+
+STEP 4. Install the packages
+
+    python -m pip install -r requirements.txt
+
+  It should end with "Successfully installed ... openpyxl-3.1.5 ...".
+
+  IF IT FAILS WITH A NETWORK / PROXY / SSL ERROR (common on office laptops):
+
+    Option A - behind a company proxy (ask IT for the address):
+      python -m pip install --proxy http://<proxy-host>:<port> -r requirements.txt
+
+    Option B - your company has an internal package mirror (ask IT for the URL):
+      python -m pip install --index-url <mirror-url> -r requirements.txt
+
+    Option C - no internet access at all from that laptop:
+      On ANY machine that has internet and the same Python version, run:
+          python -m pip download -r requirements.txt -d wheels
+      Copy the resulting "wheels" folder into C:\recon_analyzer, then on the
+      office laptop run:
+          python -m pip install --no-index --find-links wheels -r requirements.txt
+
+
+STEP 5. Prove the install is correct
+
+    python test_patterns.py
+
+  The last line MUST be:
+      all 72 cases produced the expected pattern
+
+  If any line says FAIL, stop - do not use the reports. Something is different
+  about this Python or package install. (Re-check Step 1 and Step 4.)
+
+
+STEP 6. Trial run on the sample data
+
+    python recon_html_report.py sample_input\20260907
+
+  It finishes with:
+      Workbook: C:\recon_analyzer\reports\20260907\report_summary_20260907.xlsx
+      HTML report: C:\recon_analyzer\reports\20260907\report_summary_20260907.html
+
+  Open report_summary_20260907.xlsx. You should see sheets:
+      Overview, Errors, Across Tables, customer_acct_recon, demo_small_recon,
+      What the terms mean
+  The Errors sheet should say "(none) - no problems".
+  Double-click report_summary_20260907.html - it opens in your browser and
+  shows "20260907" at the top with 2 tables analysed.
+  If both work, setup is complete.
+
+
+=======================================================================
+PART 2 - EVERY TIME YOU GENERATE A REPORT
+=======================================================================
+
+STEP 1. Check your export folder looks like this
+
+    <run-folder>\                         e.g. D:\recon_exports\20260907
+        <tablename>_recon\
+            <tablename>_recon_mismatch.csv     <- the only file read
+            <tablename>_recon_added.csv        (ignored)
+            <tablename>_recon_removed.csv      (ignored)
+            <tablename>_recon_matched.csv      (ignored)
+        <another>_recon\
+            ...
+
+  Point the tool at the RUN folder (the one containing the table folders),
+  NOT at one table folder, and NOT at a single CSV.
+
+  Inside each mismatch CSV the header must be:
+      match_type, mismatch_columns, <primary key columns...>, col__s2, col__s3, ...
+  - primary key columns sit between mismatch_columns and the first __s2 column
+  - mismatch_columns holds plain column names separated by commas:  balance,open_date
+    (NOT balance__s2)
+  Open sample_input\20260907\demo_small_recon\demo_small_recon_mismatch.csv in
+  Notepad to see a correct file.
+
+  A table folder with no mismatch CSV, or a CSV that cannot be read, does NOT
+  stop the run - it is listed on the Errors sheet (see Part 3).
+
+
+STEP 2. Open Command Prompt in the tool folder
+
+    cd /d C:\recon_analyzer
+    .venv\Scripts\activate          (only if you did Part 1, Step 3)
+
+
+STEP 3. CLOSE any previous report in Excel
+
+  If the output file is open in Excel, Windows will not let it be replaced.
+  The tool will not lose your run - it saves under a new name with a timestamp
+  and tells you where - but closing it first keeps the name you asked for.
+
+
+STEP 4. Run it
+
+  Simplest - reports go to reports\<run-folder-name>\ inside the tool folder:
+
+    python recon_html_report.py "<run-folder>"
+
+  Example:
+
+    python recon_html_report.py "D:\recon_exports\20260907"
+      -> C:\recon_analyzer\reports\20260907\report_summary_20260907.xlsx
+         C:\recon_analyzer\reports\20260907\report_summary_20260907.html
+
+  To choose where the reports go, give the Excel path with -o. The web page is
+  ALWAYS written next to that Excel file, with the same name:
+
+    python recon_html_report.py "D:\recon_exports\20260907" -o "D:\recon_reports\report_summary_20260907.xlsx"
+      -> D:\recon_reports\report_summary_20260907.xlsx
+         D:\recon_reports\report_summary_20260907.html
+
+  Keep the quotes - they are needed if a path contains spaces.
+
+  (The old command  python recon_analyzer.py "<run-folder>" -o "<file>.xlsx"
+   still works, but writes only the Excel file - no web page.)
+
+  While it runs you see one line per table. A line ending in
+      <-- MANUAL CHECK
+  means that table needs a person to look at it (see Part 3). A line starting
+  MISSING or ERROR means that table was not analysed - it is on the Errors sheet.
+  It finishes with:
+      Workbook: <path of the Excel file>
+      HTML report: <path of the web page>     <- double-click it to open
+
+
+OPTIONAL SETTINGS (add to the end of the command)
+
+  --summary
+        Also print, at the end, what needs attention: tables not analysed and why,
+        tables needing a manual check and why, warnings, and the top patterns
+        across tables. Writes no extra file.
+
+  --recon-table "myschema.{table}"
+        Table name used in the ready-made SELECT queries. {table} is replaced by
+        the folder name. Default is just the folder name.
+
+  --max-combos 0
+        Show every mismatch_columns combination on each sheet (default shows 500
+        and says how many more exist). Use only if you need them all - very large
+        sheets are slow to open.
+
+  --examples 5
+        Keep more example values per pattern (default 3). At the default, each
+        column shows up to 2 examples per pattern and each combination up to 3;
+        with --examples 5 both show up to 5.
+
+  Extra files - only if you ask for them:
+  --csv
+        Also write three CSV summaries next to the page (_overview.csv,
+        _columns.csv, _across_tables.csv) for loading into other tools.
+  --json "<file>.json"
+        Also keep every count and example as a JSON file.
+
+
+=======================================================================
+PART 3 - READING THE REPORT
+=======================================================================
+
+Read the Overview sheet top to bottom. It is sorted so that what needs you most
+comes first.
+
+  1. "NOT ANALYSED" rows (at the very top)
+     Nothing in that table or file was compared - missing file, unreadable
+     folder, bad header, or CSVs placed loose in the run folder. An empty row is
+     NEVER a clean table. Details are on the Errors sheet.
+
+  2. Table name in YELLOW, "Manual check needed?" = YES
+     Every check ran, but something measurable looks odd. The reasons are listed
+     in that cell. Look at the table's own sheet before signing off.
+
+  3. "Warnings (read these)" column
+     Anything the tool could not fully check: skipped rows, malformed lines,
+     columns the recon did not flag, duplicate or uncheckable keys.
+     "none" means nothing was skipped.
+
+  4. "Headline" column - counts per risk level:
+        REAL VALUE DIFF               the value itself is different - decide on it
+        CANNOT VERIFY - check source  the file cannot prove match OR difference
+                                      - the report deliberately does not call these fine
+        TEXT FIELD - read manually    free-text wording changed
+        FORMAT/TYPE - check joins     proven same value, written differently -
+                                      will still break exact joins
+        WHITESPACE/CASE ONLY          only spaces / capitals differ
+
+  5. "Errors" sheet (second sheet - always there)
+     Every problem met while reading the run, one per row:
+        NOT ANALYSED            the table's mismatch CSV is missing, the folder
+                                could not be read, the CSV header is wrong, or
+                                CSV files were placed loose in the run folder.
+                                Nothing in that table was compared.
+        ANALYSED WITH WARNING   the table was compared, but something could not
+                                be fully checked (malformed lines, skipped rows,
+                                duplicate keys, ...). Same text as the Overview's
+                                Warnings column.
+     "(none) - no problems" means every table folder had a readable mismatch CSV
+     and nothing was skipped.
+
+  6. Each table's own sheet
+     - Column-level summary: one row per column, worst first, with example
+       values and a ready SELECT query per example.
+     - Breakdown by mismatch_columns combination: one row per combination.
+
+  7. "Across Tables" sheet
+     The same behaviour seen in many tables at once (e.g. s2 yyyy-MM-dd vs
+     s3 yyyyMMdd in 17 tables) - usually one fix instead of many.
+     One row per pattern + format. The "Where (table.column)" cell lists EVERY
+     table.column that showed it, one per line. To see where one difference
+     happens, use the filter button on the Pattern header, e.g. tick only
+     date_format_diff. (If a list is too long for one Excel cell - roughly
+     1,000+ columns - it carries on in the next row, marked "continued", with
+     the same Risk and Pattern so the filter still shows all of it.)
+
+  8. "What the terms mean" (last sheet)
+     Every label, in plain words, plus the exact test that produced it.
+
+The tool never guesses. When it cannot prove something, it says so.
+
+
+THE WEB PAGE (report_summary_<folder>.html)
+  The same findings as the workbook, easier to scan. Opens in any browser,
+  works offline, and can be emailed as a single file.
+    - Top tiles: tables analysed, needing a manual check, not analysed,
+      tables with real value differences.
+    - "Needs your attention": NOT ANALYSED tables first (with the reason), then
+      manual-check tables with their reasons.
+    - "Tables, worst first" and "Patterns across tables" charts - hover for
+      details, click a table to jump to it.
+    - Filter bar: search a table or column name, tick/untick risk levels,
+      "Manual check only".
+    - Table detail: click a table to open it. Each example shows s2 and s3 with
+      the changed characters highlighted (a dot marks a space) and a
+      "Copy SELECT" button for the lookup query.
+    - "What the terms mean" at the bottom - the same glossary as the workbook.
+  Ctrl+P prints it (or saves as PDF) with every table expanded.
+  Large runs: each table shows up to 200 combinations; the workbook lists
+  more (500 by default, or all with --max-combos 0).
+
+
+=======================================================================
+PART 4 - IF SOMETHING GOES WRONG
+=======================================================================
+
+  "is not a directory" / "is neither a folder nor a file"
+      The run-folder path is wrong. Check it in File Explorer and keep the quotes.
+
+  "no table subfolders found"
+      You pointed at a single table folder or at a CSV. Point at the folder that
+      CONTAINS the table folders.
+
+  "Could not write ... It is most likely open in Excel. Saved here instead: ..."
+      Not an error - the workbook was saved under the new name shown. The web
+      page still uses the name you asked for.
+
+  A table appears as NOT ANALYSED (Errors sheet)
+      "no *mismatch*.csv file in this folder"  - that table folder has no
+          mismatch CSV; the cell lists the CSVs that ARE there.
+      "no 'mismatch_columns' column found"     - that CSV's header is not in the
+          expected format. Compare it with the file in sample_input.
+      "CSV file(s) sit directly in the input folder" - CSVs were placed in the
+          run folder itself instead of inside a table folder.
+
+  The web page opens blank
+      Your browser has JavaScript switched off for local files. Open it in
+      Edge or Chrome, or use the Excel workbook - it has the same content.
+
+  "No module named openpyxl" or "No module named dateutil"
+      Packages are not installed in this window. Run the activate line from
+      Part 2 Step 2, or repeat Part 1 Step 4.
+
+  test_patterns.py shows FAIL
+      Do not trust reports from this install. Re-check Python version and
+      re-install packages.
+
+  "cannot create the output folder"
+      The -o path points at a drive or location that does not exist or you
+      cannot write to. It stops immediately, before reading anything. Output
+      folders that merely do not exist yet are created for you.
+
+  How long it takes (measured on a normal laptop):
+      sampled export, 200 tables / ~430,000 rows   about 1 minute
+      one table of 3,000,000 rows (1 GB file)      about 4 minutes
+      Memory stays under ~500 MB however large the files are.
+      Building the web page adds about a second.
+
+
+=======================================================================
+PART 5 - THE CLAUDE CODE SKILL WAY (optional)
+=======================================================================
+
+If you use Claude Code, it can run Part 2 for you and tell you what needs
+attention. It runs exactly the same command as Part 2 Step 4 (with --summary),
+so you get the same two files and the same numbers.
+
+ONE-TIME SETUP (on each laptop)
+  1. Part 1 Steps 1-5 must be done (Python + packages).
+  2. Install the skill, from the tool folder:
+
+       cd /d C:\recon_analyzer
+       python install_skill.py
+
+     It ends with "Installed the /recon-summary skill to: C:\Users\<you>\.claude\skills\recon-summary".
+     That copies claude_skill\recon-summary\SKILL.md into your Claude Code
+     settings and writes C:\recon_analyzer into it, so the skill works in
+     Claude Code opened in ANY folder.
+  3. Restart Claude Code (close and reopen it) so it picks the skill up.
+
+  If you made the .venv in Part 1 Step 3, the skill uses it automatically.
+
+  Why a separate install step: Claude Code only reads skills from a folder named
+  .claude, and folders starting with a dot are often skipped by git tools and
+  uploads. So the skill is kept in the normal claude_skill\ folder (which is
+  committed with everything else) and install_skill.py puts a copy where Claude
+  Code looks.
+
+  Other install options:
+    python install_skill.py --project    only for Claude Code opened in the tool folder
+    python install_skill.py --remove     uninstall
+  Run python install_skill.py again after moving the tool folder or pulling a
+  newer version of claude_skill\recon-summary\SKILL.md.
+
+USING IT
+  1. Open Claude Code in any folder
+     (VS Code: open any folder, then open Claude Code;
+      terminal:  claude )
+  2. Type:
+
+       /recon-summary D:\recon_exports\20260907
+
+     Optional extras, same meaning as in Part 2:
+
+       /recon-summary D:\recon_exports\20260907 D:\recon_reports
+       /recon-summary D:\recon_exports\20260907 --recon-table "myschema.{table}"
+
+     (the second path is the folder the reports go in; they are still named
+      report_summary_<run-folder-name>.xlsx and .html)
+
+     You can also just ask in plain words, e.g.
+       "summarise the recon reports in D:\recon_exports\20260907"
+
+  3. Claude runs the tool, opens the web page, and replies with:
+       - where the two files are
+       - totals: tables analysed / need manual check / not analysed
+       - every NOT ANALYSED table and why (the Errors sheet)
+       - each manual-check table with its reasons
+       - the top patterns shared across tables (usually one fix for many)
+     It uses the report's own labels and never calls a table fine beyond what
+     the report says. The workbook is the record - read it to sign off.
+
+IF THE SKILL DOES NOT APPEAR
+  - Typing / does not list recon-summary: run  python install_skill.py  (One-time
+    setup, step 2) and restart Claude Code. If you installed with --project,
+    Claude Code must be opened in the tool folder itself.
+  - Claude asks where the tool folder is: the tool folder was moved after
+    installing. Run  python install_skill.py  again from its new location.
+  - Any error it reports is the same as running the command yourself - see Part 4.
