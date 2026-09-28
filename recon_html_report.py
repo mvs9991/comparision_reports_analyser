@@ -246,8 +246,11 @@ def write_csvs(view, base_path):
 
 def render_html(view, title):
     data = json.dumps(view, ensure_ascii=False)
-    # the data sits inside a <script> element; "</" must not close it early
-    data = data.replace("</", "<\\/")
+    # the data sits inside a <script> element. Escaping only "</" was not enough:
+    # an exported value holding "<!--" and "<script" switches the browser into a
+    # state where the real </script> no longer ends the block, and the page breaks.
+    # "<" only ever appears inside JSON strings, where < means the same thing
+    data = data.replace("<", "\\u003c")
     return (TEMPLATE
             .replace("__TITLE__", _html_escape(title))
             .replace("/*__DATA__*/null", data))
@@ -302,12 +305,20 @@ def main():
         except (AttributeError, ValueError):
             pass
 
+    # rejected before anything is read, not after a long analysis
+    problem = ra.template_problem(args.recon_table)
+    if problem:
+        sys.exit(f"ERROR: {problem}")
+
     src = args.input
     temp_dir = None
     try:
         if os.path.isdir(src):
             run_name = os.path.basename(os.path.abspath(src))
             xlsx = args.output or os.path.join(HERE, "reports", run_name, f"report_summary_{run_name}.xlsx")
+            # an existing folder as -o gets the usual file name inside it
+            if os.path.isdir(xlsx):
+                xlsx = os.path.join(xlsx, f"report_summary_{run_name}.xlsx")
             if not xlsx.lower().endswith(".xlsx"):
                 xlsx += ".xlsx"
             html_path = os.path.splitext(os.path.abspath(xlsx))[0] + ".html"
@@ -325,6 +336,8 @@ def main():
                 ap.error(f"unrecognised arguments: {' '.join(passthrough)}")
             digest_path = src
             html_path = args.output or os.path.splitext(src)[0] + ".html"
+            if os.path.isdir(html_path):
+                html_path = os.path.join(html_path, os.path.splitext(os.path.basename(src))[0] + ".html")
         else:
             sys.exit(f"ERROR: {src} is neither a folder nor a file")
 

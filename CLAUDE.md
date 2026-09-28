@@ -19,7 +19,8 @@ an Excel workbook (`.xlsx`) and a self-contained HTML page (`.html`) with the sa
 
 ```
 pip install -r requirements.txt                 # openpyxl, python-dateutil (+2 transitive), Python 3.8+
-python test_patterns.py                         # MUST end with: all 72 cases produced the expected pattern
+python test_patterns.py                         # MUST end with: all 79 cases produced the expected pattern
+python test_end_to_end.py                       # MUST end with: all end-to-end checks passed
 python recon_html_report.py sample_input\20260907            # xlsx + html -> reports\20260907\
 python recon_html_report.py "<run-folder>" --summary         # also print what needs attention
 python recon_html_report.py "<run-folder>" -o "<out-dir>\report_summary_<run>.xlsx"
@@ -27,17 +28,20 @@ python recon_analyzer.py "<run-folder>" -o out.xlsx          # engine alone: Exc
 python install_skill.py                                      # install the /recon-summary Claude Code skill
 ```
 
-There is no build step, linter config or CI. `test_patterns.py` is the only test suite;
-run it after **any** change to `recon_analyzer.py`. The sample data in `sample_input/`
+There is no build step, linter config or CI. Two test suites, both plain scripts (no pytest):
+`test_patterns.py` (every value-pair rule) and `test_end_to_end.py` (whole runs in a temp folder:
+broken inputs reported, workbook == page, hostile values, CLI checks). Run both after **any** change
+to `recon_analyzer.py` or `recon_html_report.py`. The sample data in `sample_input/`
 must keep producing a clean run (Errors sheet says "(none) - no problems").
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `recon_analyzer.py` | The engine (~2,240 lines): CSV streaming, pair classification, risk tiers, Excel writer, JSON digest. Also a CLI. |
+| `recon_analyzer.py` | The engine (~2,320 lines): CSV streaming, pair classification, risk tiers, Excel writer, JSON digest. Also a CLI. |
 | `recon_html_report.py` | The normal entry point. Runs `recon_analyzer.py` as a subprocess, reads its JSON digest, renders the HTML page. Imports `recon_analyzer` (read-only) for descriptions/glossary. Unknown flags are passed through to the analyzer. |
 | `test_patterns.py` | Coverage matrix: `(type, column, s2, s3, expected_pattern)` cases + tier and observation guards. |
+| `test_end_to_end.py` | Whole-run checks: NOT ANALYSED tables, warnings, one-sided columns, column overrides, workbook vs page numbers, `--recon-table` / `-o` handling, page escaping. |
 | `install_skill.py` | Copies `claude_skill/recon-summary/` into `~/.claude/skills/` (or `./.claude/skills/` with `--project`) and substitutes the `{{TOOL_FOLDER}}` placeholder. |
 | `claude_skill/recon-summary/SKILL.md` | Source of the `/recon-summary` slash command. Edit here, never the installed copy. |
 | `sample_input/20260907/` | Two tiny example tables in the exact input format. |
@@ -89,8 +93,8 @@ naming in the docs is a convention of the source system, not a requirement.
 5. Add cases to `CASES` in `test_patterns.py`, including a "must not be reassuring" case if the
    pattern could ever be mistaken for harmless; add it to `MUST_NOT_BE_REASSURING` if its tier must
    stay REAL or CANNOT VERIFY.
-6. Run `python test_patterns.py` and the sample run. Update the case count quoted in
-   `STEPS.txt` (Part 1 Step 5) and here if it changes (currently 72).
+6. Run `python test_patterns.py`, `python test_end_to_end.py` and the sample run. Update the case
+   count quoted in `STEPS.txt` (Part 1 Step 5), README, HANDOFF and here if it changes (currently 79).
 
 ## Conventions
 

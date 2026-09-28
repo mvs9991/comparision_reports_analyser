@@ -7,8 +7,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-from recon_analyzer import classify_pair, column_observations, pattern_risk
+from recon_analyzer import classify_pair, column_observations, pattern_risk  # noqa: E402
 
 CASES = [
     # ---- INTEGER ----
@@ -19,6 +18,7 @@ CASES = [
     ("INTEGER", "amt_owed", "(500)", "-500", "accounting_negative_diff"),
     ("INTEGER", "qty", "5", "7", "numeric_value_diff"),
     ("INTEGER", "big", "1000000", "1E+06", "numeric_scientific_notation"),
+    ("INTEGER", "amount", "500-", "-500", "numeric_sign_format_diff"),
 
     # ---- DECIMAL ----
     ("DECIMAL", "balance", "10.00", "10.0", "numeric_scale_diff"),
@@ -26,6 +26,8 @@ CASES = [
     ("DECIMAL", "price", "99.456789", "99.46", "numeric_rounding"),
     ("DECIMAL", "price", "100.00", "150.00", "numeric_value_diff"),
     ("DECIMAL", "fee", "$10.00", "10.00", "currency_symbol_diff"),
+    ("DECIMAL", "amount", "500.00-", "500.0-", "numeric_scale_diff"),
+    ("DECIMAL", "rate", "10.00%", "10.0%", "numeric_scale_diff"),
 
     # ---- FLOAT / DOUBLE ----
     ("FLOAT", "rate", "0.3", "0.30000000000000004", "float_precision_noise"),
@@ -91,6 +93,10 @@ CASES = [
     ("NO FALSE OK", "code", "1-23", "12-3", "value_diff"),
     ("NO FALSE OK", "amt", "10", "10", "no_actual_diff"),
     ("NO FALSE OK", "rate", "99.456789012345678", "99.46", "numeric_rounding"),
+    ("NO FALSE OK", "amount", "500-", "500", "numeric_value_diff"),
+    ("NO FALSE OK", "amount", "1,234.50-", "1234.50", "numeric_value_diff"),
+    ("NO FALSE OK", "amount", "12-", "12", "numeric_value_diff"),
+    ("NO FALSE OK", "qty", "1", "true", "value_diff"),
 
     # ---- MUST STILL BE RECOGNISED WHEN GENUINELY EQUAL ----
     ("PROVEN SAME", "open_date", "13/05/2024", "2024-05-13", "date_format_diff"),
@@ -154,4 +160,7 @@ def run():
 
 
 if __name__ == "__main__":
+    # only when run directly: rewrapping stdout on import swallowed the output
+    # of any script that imported CASES from here
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.exit(run())

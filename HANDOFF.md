@@ -2,8 +2,8 @@
 
 A briefing for whoever picks this project up next - a person, Claude Code, or any other agent.
 Read this first, then [CLAUDE.md](CLAUDE.md) (working rules), then skim [STEPS.txt](STEPS.txt)
-(operator manual). Last verified: `python test_patterns.py` -> `all 72 cases produced the expected pattern`
-on Python 3.9.6.
+(operator manual). Last verified: `python test_patterns.py` -> `all 79 cases produced the expected pattern`
+and `python test_end_to_end.py` -> `all end-to-end checks passed`, on Python 3.9.6 and 3.12.10.
 
 ## 1. The problem being solved
 
@@ -27,7 +27,8 @@ change - one fix, not 17").
 
 | Deliverable | Status |
 |---|---|
-| Pair classifier with 41 named patterns (plus dynamic `punct_removed_in_s3:<ch>` / `punct_added_in_s3:<ch>`), exact decimal/date arithmetic | Done, covered by 72 test cases |
+| Pair classifier with 41 named patterns (plus dynamic `punct_removed_in_s3:<ch>` / `punct_added_in_s3:<ch>`), exact decimal/date arithmetic | Done, covered by 79 test cases |
+| End-to-end self-test (`test_end_to_end.py`): broken inputs, workbook vs page, CLI checks, page escaping | Done |
 | Streaming CSV reader (constant memory; tested to ~3M rows / 1 GB per table per STEPS.txt) | Done |
 | Excel workbook: Overview, Errors, Across Tables, one sheet per table, glossary | Done |
 | Self-contained HTML report (filters, charts, highlighted diffs, "Copy SELECT" buttons, print-friendly) | Done |
@@ -104,7 +105,8 @@ in s3, duplicate keys, malformed lines, differences the recon did not list, ...)
 
 ## 6. How to verify your work
 
-1. `python test_patterns.py` - must end with `all 72 cases produced the expected pattern`.
+1. `python test_patterns.py` - must end with `all 79 cases produced the expected pattern`;
+   `python test_end_to_end.py` - must end with `all end-to-end checks passed`.
 2. `python recon_html_report.py sample_input\20260907 --summary` - expect 2 tables analysed, the
    Errors sheet reading "(none) - no problems", and both output files under `reports\20260907\`.
 3. Open the `.html` in a browser (no server needed) and the `.xlsx` in Excel; numbers must match.
@@ -131,9 +133,8 @@ in s3, duplicate keys, malformed lines, differences the recon did not list, ...)
 ## 8. Ideas not yet done
 
 - `pyproject.toml` / pip-installable console scripts; a licence file.
-- CI (GitHub Actions) running `test_patterns.py` and the sample run on Windows + Linux.
-- Convert `test_patterns.py` to `pytest` (keeping the table-driven `CASES`), and add end-to-end tests
-  that assert on the generated workbook/digest for `sample_input`.
+- CI (GitHub Actions) running both test scripts on Windows + Linux.
+- Convert both test scripts to `pytest` (keeping the table-driven `CASES`).
 - Split `recon_analyzer.py` (classifier / analysis / Excel writer) and move the HTML template into its
   own file - they are independent and the module is large.
 - Redact or relativise the run-folder path embedded in the HTML.

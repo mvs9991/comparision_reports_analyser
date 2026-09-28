@@ -30,7 +30,8 @@ Requires Python 3.8+ (tested on 3.9).
 
 ```bash
 pip install -r requirements.txt
-python test_patterns.py                                  # self-test: should end "all 72 cases produced the expected pattern"
+python test_patterns.py                                  # self-test: should end "all 79 cases produced the expected pattern"
+python test_end_to_end.py                                # whole-run self-test: should end "all end-to-end checks passed"
 python recon_html_report.py sample_input/20260907        # try it on the bundled sample
 ```
 
@@ -114,6 +115,7 @@ about four minutes for a single 3,000,000-row (1 GB) file. Building the HTML add
 recon_html_report.py   main command: Excel + HTML in one run
 recon_analyzer.py      analysis engine (also a stand-alone Excel-only CLI)
 test_patterns.py       coverage matrix for every comparison rule
+test_end_to_end.py     whole-run checks: broken inputs, workbook vs page, CLI handling
 install_skill.py       installs the Claude Code skill
 claude_skill/          source of the /recon-summary skill
 sample_input/          two small example tables in the expected format
@@ -123,5 +125,5 @@ CLAUDE.md, HANDOFF.md  orientation for coding agents and new maintainers
 
 ## Contributing
 
-Run `python test_patterns.py` after any change to `recon_analyzer.py`. To add a comparison pattern, follow the
+Run `python test_patterns.py` and `python test_end_to_end.py` after any change to the scripts. To add a comparison pattern, follow the
 recipe in [CLAUDE.md](CLAUDE.md); for background and design rationale see [HANDOFF.md](HANDOFF.md).

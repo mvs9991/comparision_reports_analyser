@@ -119,6 +119,20 @@ PLAIN_NUMBER = re.compile(r"^[-+]?\d+(?:\.\d+)?$")
 # '12,34' could be a decimal comma, so it is not treated as a number at all
 GROUPED_NUMBER = re.compile(r"^[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$")
 COMMA_NUMBER = re.compile(r"^[-+]?\d+(?:,\d+)+(?:\.\d+)?$")
+TRAILING_MINUS = re.compile(r"^\d[\d,]*(?:\.\d+)?\s?-$")
+LEADING_DIGITS = re.compile(r"\d*")
+
+
+def _decimal_places(s):
+    """Digits after the decimal point, ignoring a trailing -, %, ) or symbol.
+
+    Counting every character after the point read '500.00-' and '10.00%' as
+    three decimal places, so a matching pair looked like a precision change.
+    """
+    plain = s.replace(",", "")
+    if "." not in plain:
+        return 0
+    return len(LEADING_DIGITS.match(plain.split(".", 1)[1]).group())
 HAS_DIGIT = re.compile(r"\d")
 MONTH_WORD = re.compile(
     r"\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|"
@@ -241,6 +255,12 @@ def _to_dec(s):
     negative = False
     if core.startswith("(") and core.endswith(")"):
         core = core[1:-1].strip()
+        negative = True
+    elif TRAILING_MINUS.match(core):
+        # 500- is how several mainframe / ERP exports write -500. Left unread,
+        # '500-' vs '500' fell through to "the - was removed, rest identical" -
+        # a lost sign reported as a harmless format difference
+        core = core[:-1].rstrip()
         negative = True
     if "," in core:
         if not GROUPED_NUMBER.match(core):
@@ -423,11 +443,11 @@ def classify_pair(col, s2, s3):
         if (a_s.startswith("(") and a_s.endswith(")")) != (b_s.startswith("(") and b_s.endswith(")")):
             return "accounting_negative_diff", None
 
-        def decimals(s):
-            s = s.replace(",", "")
-            return len(s.split(".")[1]) if "." in s else 0
+        # -500 vs 500-: the same number, the sign written at the other end
+        if bool(TRAILING_MINUS.match(a_s)) != bool(TRAILING_MINUS.match(b_s)):
+            return "numeric_sign_format_diff", None
 
-        da, db = decimals(a_s), decimals(b_s)
+        da, db = _decimal_places(a_s), _decimal_places(b_s)
         if da != db:
             return "numeric_scale_diff", float(db - da)
         if ("," in a_s) != ("," in b_s):
@@ -528,7 +548,10 @@ def classify_pair(col, s2, s3):
     if result:
         return result
 
-    if both_bool:
+    # without a flag-like column name, 1 and 0 may just as well be a count, so
+    # '1' vs 'true' is not proven to be the same boolean. analyze_table() still
+    # reads it as one when the column's own values show it is a yes/no column
+    if both_bool and a_s not in ("0", "1") and b_s not in ("0", "1"):
         return ("boolean_format_diff", None) if ba == bb else ("boolean_value_diff", None)
 
     if _typo(a) == _typo(b):
@@ -602,7 +625,7 @@ PATTERN_INFO = {
     "float_precision_noise": (R_CHECK, 'DECIMAL VALUE MISMATCH - the numerical values match; only the decimal digits differ (the column is held as float/double, e.g. 0.3 vs 0.30000000000000004)'),
     "currency_symbol_diff": (R_UNSURE, 'NOT MATCHED - a currency symbol is on one side only ($10.00 vs 10.00). The digits agree, but the currency is not confirmed on both sides, so these cannot be treated as matched'),
     "accounting_negative_diff": (R_CHECK, "negative written as (n) on one side and -n on the other; same number"),
-    "numeric_sign_format_diff": (R_CHECK, "explicit + sign on one side only; same number"),
+    "numeric_sign_format_diff": (R_CHECK, "the sign is written differently - an explicit + on one side only, or a trailing minus (500-) against a leading one (-500); same number"),
     "timezone_marker_diff": (R_CHECK, 'DATE FORMAT ISSUE - the clock time is the same, but one side carries a timezone and the other does not; conversions downstream may not agree'),
     "timezone_representation_diff": (R_CHECK, 'DATE FORMAT ISSUE - the same instant, written at a different UTC offset'),
     "epoch_vs_formatted_date": (R_CHECK, 'DATE FORMAT ISSUE - the date/time is the same; one side stores it as an epoch number, the other as a formatted date'),
@@ -617,7 +640,7 @@ PATTERN_INFO = {
     "boolean_format_diff": (R_CHECK, "same boolean written differently (Y/N vs true/false vs 1/0); the stored string differs"),
     "leading_zero_diff": (R_CHECK, "leading zeros differ; digits otherwise identical - changes the stored string"),
     "separator_format_diff": (R_CHECK, "same alphanumerics, different separators/punctuation"),
-    "null_representation_diff": (R_REAL, "one side is an empty string, the other a NULL/placeholder token (e.g. '' vs 'NULL') - these behave differently in joins, aggregations, IS NULL checks and downstream filters"),
+    "null_representation_diff": (R_REAL, "both sides are empty or a NULL/placeholder token, written differently (e.g. '' vs 'NULL', or 'NULL' vs 'null') - an empty string and a NULL behave differently in joins, aggregations, IS NULL checks and downstream filters"),
     "unicode_fold_diff": (R_CHECK, "the same letters, but accented on one side and plain on the other (e.g. JOSE with and without the accent)"),
 
     "numeric_rounding": (R_REAL, "s3 is a ROUNDED version of s2 - real precision was lost. Rounding is not an acceptable migration difference: treat this as a data difference, not a formatting one"),
@@ -703,9 +726,7 @@ def numeric_shape(s):
     """
     if "e" in s.lower():
         return "scientific"
-    plain = s.replace(",", "")
-    places = len(plain.split(".")[1]) if "." in plain else 0
-    return f"{places}dp" + (" +sep" if "," in s else "")
+    return f"{_decimal_places(s)}dp" + (" +sep" if "," in s else "")
 
 
 def value_shape(s, pattern=""):
@@ -744,10 +765,12 @@ def is_text_field(colname, sample_values):
 
 TEXT_OVERRIDE_PATTERNS = {"value_diff", "partial_value_diff"}
 
-# on a boolean column these arithmetic verdicts are the wrong reading of 1 vs 0
+# on a boolean column these arithmetic verdicts are the wrong reading of 1 vs 0;
+# value_diff is what '1' vs 'true' becomes when the column name alone does not
+# say it is a flag, so the column's own values decide it here
 BOOL_OVERRIDE_PATTERNS = {
     "numeric_value_diff", "numeric_scale_diff", "numeric_format_diff",
-    "numeric_sign_format_diff",
+    "numeric_sign_format_diff", "value_diff",
 }
 
 
@@ -857,8 +880,21 @@ def open_table(csv_path):
             pair_map[base.lower()] = (base, i, j)
 
     first_s2 = min(s2_idx, default=len(cols))
-    pk_idx = list(range(mm_idx + 1, first_s2))
+    # match_type is not a key even when the export puts it after mismatch_columns;
+    # counting it would put match_type='mismatch' into every lookup query
+    pk_idx = [i for i in range(mm_idx + 1, first_s2) if i != mt_idx]
     pk_cols = [cols[i] for i in pk_idx]
+
+    # a column with only one half of its pair cannot be compared; without this
+    # it vanished without a word - typically a column dropped from the new table
+    s2_bases = {lower[i][:-4] for i in s2_idx}
+    s3_bases = {name[:-4] for name in s3_by_name}
+    unpaired = {
+        "only_s2": [cols[i] for i in s2_idx if lower[i][:-4] not in s3_bases],
+        "only_s3": [cols[j] for j in sorted(s3_by_name.values()) if lower[j][:-4] not in s2_bases],
+        "other": [cols[i] for i in range(first_s2, len(cols))
+                  if not lower[i].endswith(("__s2", "__s3")) and i not in (mm_idx, mt_idx)],
+    }
 
     width = len(cols)
 
@@ -885,7 +921,7 @@ def open_table(csv_path):
     return {
         "cols": cols, "mm_idx": mm_idx, "mt_idx": mt_idx,
         "pk_idx": pk_idx, "pk_cols": pk_cols,
-        "pair_map": pair_map, "notes": notes, "rows": rows(), "stats": stats,
+        "pair_map": pair_map, "unpaired": unpaired, "notes": notes, "rows": rows(), "stats": stats,
     }
 
 
@@ -977,7 +1013,7 @@ def _names(cols, limit=4):
 
 
 def manual_check_reasons(columns_summary, total_rows, unlisted, blank_rows_identical,
-                         dupes, dup_info, pk_cols, skipped_match_type, stats):
+                         dupes, dup_info, pk_cols, skipped_match_type, stats, unpaired=None):
     """Everything measurable that a person should look at, even though the checks ran.
 
     A real value difference on its own is an expected finding, not an oddity, so
@@ -1035,6 +1071,13 @@ def manual_check_reasons(columns_summary, total_rows, unlisted, blank_rows_ident
     junk = cols_where(lambda c: c.get("charset_junk", {}).get("s2") or c.get("charset_junk", {}).get("s3"))
     if junk:
         reasons.append(f"invalid / control characters in {_names(junk)}")
+
+    unpaired = unpaired or {}
+    one_side = unpaired.get("only_s2", []) + unpaired.get("only_s3", [])
+    if one_side:
+        reasons.append(f"columns present on one side only, so NOT compared: {_names(one_side)}")
+    if unpaired.get("other"):
+        reasons.append(f"columns that are neither __s2 nor __s3, so NOT compared: {_names(unpaired['other'])}")
 
     if unlisted:
         reasons.append(f"the recon did not flag differences in {_names(sorted(unlisted))}")
@@ -1419,6 +1462,22 @@ def analyze_table(table_name, csv_path, examples_per_group=3):
             f"CANNOT VERIFY: {len(missing_pairs)} column(s) named in mismatch_columns have no "
             f"__s2/__s3 pair in the file: {sorted(missing_pairs)[:5]}"
         )
+    unpaired = loaded["unpaired"]
+    if unpaired["only_s2"]:
+        notes.append(
+            f"COLUMN ON ONE SIDE ONLY: {_names(unpaired['only_s2'], 10)} exist only as __s2 (no "
+            f"__s3 to compare with) and were NOT compared - the column may be missing from the new table"
+        )
+    if unpaired["only_s3"]:
+        notes.append(
+            f"COLUMN ON ONE SIDE ONLY: {_names(unpaired['only_s3'], 10)} exist only as __s3 (no "
+            f"__s2 to compare with) and were NOT compared - the column may be missing from the live side"
+        )
+    if unpaired["other"]:
+        notes.append(
+            f"NOT COMPARED: {_names(unpaired['other'], 10)} sit among the __s2/__s3 columns but are "
+            f"neither, so they were not compared"
+        )
 
     headline = (
         f"{risk_counts.get(R_REAL, 0)} of {len(columns_summary)} mismatched columns show real value "
@@ -1435,11 +1494,12 @@ def analyze_table(table_name, csv_path, examples_per_group=3):
         risk_counts.get(R_REAL) or risk_counts.get(R_UNSURE) or risk_counts.get(R_TEXT)
         or unlisted or blank_rows_identical or dupes or skipped_match_type
         or stats["short_rows"] or stats["long_rows"] or not dup_info["complete"] and pk_cols
+        or any(unpaired.values())
     )
 
     manual_reasons = manual_check_reasons(
         columns_summary, total_rows, unlisted, blank_rows_identical, dupes,
-        dup_info, pk_cols, skipped_match_type, stats,
+        dup_info, pk_cols, skipped_match_type, stats, unpaired,
     )
 
     return {
@@ -1530,6 +1590,22 @@ def lookup_query(table_template, table_name, pk_cols, pk_vals):
         for col, val in zip(pk_cols, pk_vals)
     )
     return f"SELECT * FROM {table} WHERE {conds};"
+
+
+def template_problem(table_template):
+    """None when the --recon-table template works, else why it does not.
+
+    Checked before any table is read: str.format() raises on an unknown
+    placeholder, and it used to do so while the workbook was being written,
+    throwing the whole finished analysis away.
+    """
+    try:
+        table_template.format(table="t")
+    except (KeyError, IndexError, ValueError) as exc:
+        return (f"--recon-table '{table_template}' is not a usable template. {{table}} is the only "
+                f"placeholder it may contain; write a literal brace as {{{{ or }}}} "
+                f"({exc.__class__.__name__}: {exc})")
+    return None
 
 
 def style_header_row(ws, row_idx, ncols):
@@ -1875,7 +1951,7 @@ GLOSSARY = [
     ('float_precision_noise', 'DECIMAL VALUE MISMATCH. The numerical values match; only the decimal digits differ, because the column is held as float/double', '0.3 -> 0.30000000000000004', "the sides have different decimal places, rounding the longer back to the shorter's places gives the shorter exactly, the longer has 15+ significant digits, and they differ by at most 1 part in 10^15. Same decimal places that differ is NEVER noise"),
     ('numeric_thousands_sep_diff', 'Thousands separator on one side only', '1,000 -> 1000', "Decimal(s2) == Decimal(s3) exactly AND (',' in s2) != (',' in s3); commas must be valid 3-digit grouping"),
     ('numeric_scientific_notation', 'One side written in scientific notation', '1000000 -> 1E+06', "Decimal(s2) == Decimal(s3) exactly AND ('e' in s2.lower()) != ('e' in s3.lower())"),
-    ('numeric_sign_format_diff', 'An explicit + sign on one side only', '+5 -> 5', "Decimal(s2) == Decimal(s3) exactly AND s2.startswith('+') != s3.startswith('+')"),
+    ('numeric_sign_format_diff', 'The sign is written differently: an explicit + on one side only, or a trailing minus (500-) against a leading one (-500)', '+5 -> 5   /   500- -> -500', "Decimal(s2) == Decimal(s3) exactly (a trailing minus is read as negative) AND the sign is written differently. A sign that is LOST (500- -> 500) is a different number: numeric_value_diff"),
     ('accounting_negative_diff', 'Negative written as (n) on one side, -n on the other', '(500) -> -500', 'numbers equal once (n) is read as -n, AND only one side is wrapped in parentheses'),
     ('currency_symbol_diff', 'NOT MATCHED - CANNOT VERIFY. A currency symbol is on one side only. The digits agree, but the currency is not confirmed on both sides, so it is not treated as a match', '$10.00 -> 10.00', 'the digits are equal once symbols are removed, AND only one side carries a currency symbol'),
     ('leading_zero_diff', 'Leading zeros lost or gained. The digits match but the stored text does not', '000123 -> 123', "s2.strip().lstrip('0') == s3.strip().lstrip('0')"),
@@ -1884,7 +1960,7 @@ GLOSSARY = [
     ('timezone_marker_diff', "DATE FORMAT ISSUE. Same clock time, but one side carries a timezone and the other does not. Also raises 'Manual check needed?'", '...T00:00:00Z -> ...00:00:00', 'one parsed side has a timezone and the other does not, while the wall-clock parts are equal'),
     ('timezone_representation_diff', "DATE FORMAT ISSUE. The same instant written at a different UTC offset. Also raises 'Manual check needed?'", '', 'both sides timezone-aware, instants equal, UTC offsets different'),
     ('epoch_vs_formatted_date', "DATE FORMAT ISSUE. The date/time is the same; one side is an epoch number, the other a readable date. Also raises 'Manual check needed?'", '1704067200 -> 2024-01-01', "one side is exactly 10 or 13 digits; read as epoch seconds/millis (UTC) it equals the other side's complete date EXACTLY"),
-    ('boolean_format_diff', 'Same true/false meaning, written differently', 'Y -> true', 'both sides map into {y,n,yes,no,true,false,t,f,1,0} AND map to the SAME boolean'),
+    ('boolean_format_diff', 'Same true/false meaning, written differently', 'Y -> true', 'both sides map into {y,n,yes,no,true,false,t,f,1,0} AND map to the SAME boolean. A 1 or 0 counts only on a column named like a flag (is_, _flag, _ind, _yn...) or whose values are all yes/no values - elsewhere 1 may be a number'),
     ('boolean_value_diff', 'Opposite true/false values', 'Y -> N', 'both sides map into that set AND map to OPPOSITE booleans'),
     ('missing_in_s3', 's2 has a value and s3 is empty - data missing on the new side', "2024-06-01 -> ''", 's3 is empty or a null token while s2 is not'),
     ('missing_in_s2', 's3 has a value and s2 is empty - extra data on the new side', "'' -> 2024-06-01", 's2 is empty or a null token while s3 is not'),
@@ -1911,7 +1987,7 @@ GLOSSARY = [
     ('Consistency observations', 'Facts measured across all the records: a constant offset, a uniform rounding, whether the behaviour is the same every time', '', ''),
     ('Lookup query per example', 'A ready SELECT for each example, in the same order as the examples beside it. Paste it in to pull that exact record', '', ''),
     ('Warnings (read these)', "On the Overview: everything the tool could not fully check for that table - skipped rows, malformed lines, columns the recon did not flag, duplicate keys. 'none' means nothing was skipped", '', ''),
-    ('Manual check needed?', "On the Overview. YES (table name in yellow) means every check ran, but something measurable looks odd and a person should look before signing off: differences no rule explains, date format issues (even though the dates match), values that cannot be verified, free-text changes, real and format-only changes mixed in one column, a constant shift, a column empty in s3, cut-off values, invalid characters, differences the recon did not flag, duplicate or uncheckable keys, skipped or malformed rows, or several mismatch files. The reasons are listed in the cell. A table with only ordinary real value differences says 'no' here - those are already in the headline", '', 'rule-based: any one of the conditions listed triggers it'),
+    ('Manual check needed?', "On the Overview. YES (table name in yellow) means every check ran, but something measurable looks odd and a person should look before signing off: differences no rule explains, date format issues (even though the dates match), values that cannot be verified, free-text changes, real and format-only changes mixed in one column, a constant shift, a column empty in s3, cut-off values, invalid characters, differences the recon did not flag, a column present on one side only (so never compared), duplicate or uncheckable keys, skipped or malformed rows, or several mismatch files. The reasons are listed in the cell. A table with only ordinary real value differences says 'no' here - those are already in the headline", '', 'rule-based: any one of the conditions listed triggers it'),
     ('RECON DID NOT FLAG', 'A column whose s2 and s3 text differ on a row where mismatch_columns did not name it. Your recon may be missing a difference - or deliberately normalising before it compares', '', 'every __s2/__s3 pair on every row is compared, not just the listed ones'),
     ('[mismatch_columns blank - every column compared]', 'Rows whose mismatch_columns was empty. Every column is compared for them instead of the row being skipped', '', ''),
     ('NOT ANALYSED', 'On the Overview: a table or file nothing was compared for (missing file, unreadable folder, bad header). Never read an empty row as clean', '', ''),
@@ -2125,7 +2201,14 @@ def main():
     if not os.path.isdir(args.input_folder):
         sys.exit(f"ERROR: {args.input_folder} is not a directory")
     args.examples = max(1, args.examples)
+    problem = template_problem(args.recon_table)
+    if problem:
+        sys.exit(f"ERROR: {problem}")
 
+    # a folder given as -o gets the default file name inside it, instead of a
+    # workbook called '<folder>.xlsx' being written beside it
+    if os.path.isdir(args.output):
+        args.output = os.path.join(args.output, "recon_summary.xlsx")
     if not args.output.lower().endswith(".xlsx"):
         args.output += ".xlsx"
     # create output folders BEFORE the analysis: a bad path must fail in the

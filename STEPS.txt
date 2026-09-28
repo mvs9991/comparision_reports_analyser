@@ -19,6 +19,7 @@ WHAT IS IN THIS FOLDER
   recon_html_report.py the command you run: writes the Excel workbook AND the web page
   recon_analyzer.py    the analysis engine (still works on its own - Excel only)
   test_patterns.py     self-test: proves every comparison rule still behaves correctly
+  test_end_to_end.py   self-test: whole runs - broken inputs reported, workbook = page
   requirements.txt     the Python packages it needs (exact versions)
   sample_input\        two small example tables, in the exact format the tool expects
   claude_skill\recon-summary\SKILL.md
@@ -102,9 +103,11 @@ STEP 4. Install the packages
 STEP 5. Prove the install is correct
 
     python test_patterns.py
+    python test_end_to_end.py
 
-  The last line MUST be:
-      all 72 cases produced the expected pattern
+  The last lines MUST be:
+      all 79 cases produced the expected pattern
+      all end-to-end checks passed
 
   If any line says FAIL, stop - do not use the reports. Something is different
   about this Python or package install. (Re-check Step 1 and Step 4.)
@@ -347,9 +350,13 @@ PART 4 - IF SOMETHING GOES WRONG
       Packages are not installed in this window. Run the activate line from
       Part 2 Step 2, or repeat Part 1 Step 4.
 
-  test_patterns.py shows FAIL
+  test_patterns.py or test_end_to_end.py shows FAIL
       Do not trust reports from this install. Re-check Python version and
       re-install packages.
+
+  "--recon-table '...' is not a usable template"
+      The value given to --recon-table may contain {table} and nothing else in
+      braces, e.g. "myschema.{table}". It stops immediately, before reading anything.
 
   "cannot create the output folder"
       The -o path points at a drive or location that does not exist or you
