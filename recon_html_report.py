@@ -21,7 +21,7 @@ Any other recon_analyzer.py option is passed straight through, e.g.
 
 Optional extras (nothing extra is written unless asked):
     --summary       print what needs attention to the console
-    --csv           also write three CSV summaries beside the page
+    --csv           also write one consolidated CSV beside the page
     --json <file>   also keep the JSON digest
 
 A page can also be built from a digest kept earlier, without re-analysing:
@@ -32,6 +32,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -56,10 +57,33 @@ TIERS = [
     for label in sorted(TIER_ID, key=lambda l: ra.RISK_ORDER[l])
 ]
 TIER_LABEL = {t["id"]: t["label"] for t in TIERS}
+CSV_TIER_LABEL = {
+    **TIER_LABEL,
+    "real": "Needs Review",
+    "text": "Flagged for minor differences",
+    "check": "Format Diffs",
+    "low": "Whitespace/case diffs",
+}
 
 # a table with thousands of combinations would make the page slow to open;
 # the workbook remains the complete record
 MAX_COMBOS_IN_PAGE = 200
+
+
+def report_wording(value):
+    """Use Source/Target terminology in report prose, without changing data values."""
+    if not isinstance(value, str):
+        return value
+    value = value.replace("__s2", "__source").replace("__s3", "__target")
+    value = re.sub(r"(?<![\w])s2(?![\w])", "source", value, flags=re.I)
+    return re.sub(r"(?<![\w])s3(?![\w])", "target", value, flags=re.I)
+
+
+def report_pattern(value):
+    """Readable form of rule identifiers when they are shown in a report."""
+    if not isinstance(value, str):
+        return value
+    return value.replace("_in_s2", "_in_source").replace("_in_s3", "_in_target")
 
 
 def tier_of(risk):
@@ -80,7 +104,7 @@ def build_view(digest, recon_table="{table}"):
             patterns = []
             for p, n in sorted(c["patterns"].items(), key=lambda kv: (ra.RISK_ORDER.get(ra.pattern_risk(kv[0]), 0), -kv[1])):
                 risk, desc = ra.pattern_info(p)
-                patterns.append({"name": p, "n": n, "tier": tier_of(risk), "desc": desc})
+                patterns.append({"name": report_pattern(p), "n": n, "tier": tier_of(risk), "desc": report_wording(desc)})
                 g = across[p]
                 g["tables"].add(t["table"])
                 g["columns"].add(f"{t['table']}.{c['column']}")
@@ -89,7 +113,7 @@ def build_view(digest, recon_table="{table}"):
             for e in c.get("examples", []):
                 pk = e.get("pk", {})
                 examples.append({
-                    "pattern": e["pattern"], "s2": e["s2"], "s3": e["s3"],
+                    "pattern": report_pattern(e["pattern"]), "source": e["s2"], "target": e["s3"],
                     "pk": pk,
                     "sql": ra.lookup_query(recon_table, t["table"], list(pk.keys()), list(pk.values())),
                 })
@@ -103,7 +127,7 @@ def build_view(digest, recon_table="{table}"):
                 "tier": tier_of(c["risk"]),
                 "risk": c["risk"],
                 "patterns": patterns,
-                "observations": c.get("observations", []),
+                "observations": [report_wording(x) for x in c.get("observations", [])],
                 "examples": examples,
             })
 
@@ -114,16 +138,19 @@ def build_view(digest, recon_table="{table}"):
             "sample_rows": t.get("sample_rows", 0),
             "distinct_combos": t.get("distinct_combos", len(combos)),
             "pk_cols": pk_cols,
-            "headline": t.get("headline", ""),
-            "notes": t.get("notes", []),
+            "headline": report_wording(t.get("headline", "")),
+            "notes": [report_wording(x) for x in t.get("notes", [])],
             "unlisted": t.get("unlisted_diffs", {}),
-            "reasons": t.get("manual_check_reasons", []),
+            "reasons": [report_wording(x) for x in t.get("manual_check_reasons", [])],
             "worst": tier_of(worst),
             "tier_counts": dict(tier_counts),
             "columns": columns,
             "combos": [
                 {"combo": cb["combo"], "records": cb["records"], "tier": tier_of(cb["risk"]),
-                 "per_column": cb.get("per_column", {})}
+                 "per_column": {
+                     col: {report_pattern(p): n for p, n in pats.items()}
+                     for col, pats in cb.get("per_column", {}).items()
+                 }}
                 for cb in combos[:MAX_COMBOS_IN_PAGE]
             ],
             "combos_hidden": max(0, len(combos) - MAX_COMBOS_IN_PAGE),
@@ -137,7 +164,7 @@ def build_view(digest, recon_table="{table}"):
     across_rows = sorted(
         (
             {
-                "pattern": p, "tier": tier_of(ra.pattern_risk(p)), "desc": ra.pattern_desc(p),
+                "pattern": report_pattern(p), "tier": tier_of(ra.pattern_risk(p)), "desc": report_wording(ra.pattern_desc(p)),
                 "tables": len(g["tables"]), "columns": len(g["columns"]), "records": g["records"],
                 "where": sorted(g["columns"], key=ra.natural_key), "example": g["example"],
             }
@@ -150,7 +177,7 @@ def build_view(digest, recon_table="{table}"):
     # comparison cases, whether or not that pattern appeared in this run.
     from test_patterns import CASES
     rule_cases = [
-        {"group": group, "column": col, "s2": s2, "s3": s3, "expected": pattern}
+        {"group": group, "column": col, "source": s2, "target": s3, "expected": report_pattern(pattern)}
         for group, col, s2, s3, pattern in CASES
     ]
     tested = {}
@@ -175,7 +202,11 @@ def build_view(digest, recon_table="{table}"):
             risk, meaning = ra.pattern_info(pattern)
             row = {"term": pattern, "meaning": meaning, "test": "See the comparison rule for this pattern."}
         row = dict(row)
+        row["term"] = report_pattern(pattern)
         row["example"] = f"{case['s2']} → {case['s3']}"
+        for key in ("meaning", "test"):
+            if row.get(key):
+                row[key] = report_wording(row[key])
         rules.append(row)
     glossary = [{"section": "Patterns tested by test_patterns.py", "rows": rules}]
 
@@ -221,54 +252,69 @@ def _write_csv(path, header, rows):
             w.writerow([_csv_cell(v) for v in row])
 
 
-def write_csvs(view, base_path):
-    """Three flat CSV summaries, the same facts as the page and the workbook."""
-    tier_labels = [t["label"] for t in TIERS]
-    overview, columns = [], []
+def write_csv(view, base_path):
+    """Write one consolidated CSV with summary, column, issue, and rule rows."""
+    rows = []
+    header = [
+        "Record type", "Table", "Column", "Status", "Needs your attention?", "Classification",
+        "Records", "Sample rows", "Combos", "Mismatched columns", "Field type", "Patterns",
+        "Observations", "Why a manual check", "Warnings", "Headline", "Not analysed because",
+        "Tables affected", "Columns affected", "Where (table.column)", "What it means",
+        "Case group", "Source", "Target", "Expected pattern", "Pattern example", "How the rule is decided",
+        "Example key", "Lookup query",
+    ]
+
+    def add(kind, **values):
+        values["Record type"] = kind
+        rows.append([values.get(name, "") for name in header])
+
     for e in view["errors"]:
-        overview.append([e["table"], "NOT ANALYSED", "YES", "", "", "", ""] + [""] * len(TIERS)
-                        + ["", "", "", e["error"]])
+        add("Summary", Table=e["table"], Status="Unable to Recon", **{
+            "Needs your attention?": "YES", "Not analysed because": e["error"]
+        })
     for t in view["tables"]:
-        overview.append(
-            [t["table"], "analysed", "YES" if t["reasons"] else "no",
-             TIER_LABEL[t["worst"]] if t["columns"] else "",
-             t["sample_rows"], t["distinct_combos"], len(t["columns"])]
-            + [t["tier_counts"].get(tr["id"], 0) for tr in TIERS]
-            + ["; ".join(t["reasons"]), "; ".join(t["notes"]) or "none", t["headline"], ""]
-        )
+        add("Summary", Table=t["table"], Status="Analysed",
+            **{"Needs your attention?": "YES" if t["reasons"] else "no",
+               "Classification": CSV_TIER_LABEL[t["worst"]] if t["columns"] else "",
+               "Sample rows": t["sample_rows"], "Combos": t["distinct_combos"],
+               "Mismatched columns": len(t["columns"]),
+               "Why a manual check": "; ".join(t["reasons"]),
+               "Warnings": "; ".join(t["notes"]) or "none", "Headline": t["headline"]})
         for c in t["columns"]:
             ex = c["examples"][0] if c["examples"] else None
-            columns.append([
-                t["table"], c["column"], c["risk"], c["records"], c["field_type"],
-                "; ".join(f"{p['name']}={p['n']}" for p in c["patterns"]),
-                "; ".join(c["observations"]),
-                ex["pattern"] if ex else "", ex["s2"] if ex else "", ex["s3"] if ex else "",
-                ", ".join(f"{k}={v}" for k, v in ex["pk"].items()) if ex else "",
-                ex["sql"] if ex else "",
-            ])
+            add("Column", Table=t["table"], Column=c["column"],
+                Classification=CSV_TIER_LABEL[c["tier"]], Records=c["records"],
+                **{"Field type": c["field_type"],
+                   "Patterns": "; ".join(f"{p['name']}={p['n']}" for p in c["patterns"]),
+                   "Observations": "; ".join(c["observations"]),
+                   "Pattern example": ex["pattern"] if ex else "",
+                   "Source": ex["source"] if ex else "", "Target": ex["target"] if ex else "",
+                   "Example key": ", ".join(f"{k}={v}" for k, v in ex["pk"].items()) if ex else "",
+                   "Lookup query": ex["sql"] if ex else ""})
 
-    paths = {
-        "overview": base_path + "_overview.csv",
-        "columns": base_path + "_columns.csv",
-        "across": base_path + "_across_tables.csv",
+    for issue in view["across"]:
+        example = issue["example"] or ["", ""]
+        add("Common Issue", Classification=CSV_TIER_LABEL[issue["tier"]],
+            Records=issue["records"], **{"Tables affected": issue["tables"],
+               "Columns affected": issue["columns"], "Where (table.column)": "\n".join(issue["where"]),
+               "What it means": issue["desc"], "Expected pattern": report_pattern(issue["pattern"]),
+               "Source": example[0], "Target": example[1]})
+
+    rules_by_pattern = {
+        row["term"]: row
+        for group in view["glossary"]
+        for row in group["rows"]
     }
-    _write_csv(paths["overview"],
-               ["Table", "Status", "Manual check needed?", "Worst risk", "Sample rows", "Combos",
-                "Mismatched columns"] + tier_labels
-               + ["Why a manual check", "Warnings", "Headline", "Not analysed because"],
-               overview)
-    _write_csv(paths["columns"],
-               ["Table", "Column", "Risk", "Records", "Field type", "Patterns", "Observations",
-                "Example pattern", "Example s2", "Example s3", "Example key", "Lookup query"],
-               columns)
-    _write_csv(paths["across"],
-               ["Risk", "Pattern", "Tables affected", "Columns affected", "Records",
-                "Example s2", "Example s3", "Where (table.column)", "What it means"],
-               [[TIER_LABEL[r["tier"]], r["pattern"], r["tables"], r["columns"], r["records"],
-                 r["example"][0] if r["example"] else "", r["example"][1] if r["example"] else "",
-                 "\n".join(r["where"]), r["desc"]]
-                for r in view["across"]])
-    return paths
+    for case in view["rule_cases"]:
+        rule = rules_by_pattern.get(case["expected"], {})
+        add("Rule", Column=case["column"], **{"Case group": case["group"], "Source": case["source"],
+            "Target": case["target"], "Expected pattern": case["expected"],
+            "What it means": rule.get("meaning", ""), "Pattern example": rule.get("example", ""),
+            "How the rule is decided": rule.get("test", "")})
+
+    path = base_path + "_report.csv"
+    _write_csv(path, header, rows)
+    return path
 
 
 def render_html(view, title, page="home"):
@@ -329,7 +375,7 @@ def main():
                     help="Table name template for lookup queries, as in recon_analyzer.py")
     ap.add_argument("--title", help="Page title")
     ap.add_argument("--csv", action="store_true",
-                    help="Also write three CSV summaries (overview, columns, across tables) beside the page")
+                    help="Also write one consolidated CSV (summary, columns, common issues, rules) beside the page")
     ap.add_argument("--json", dest="json_path",
                     help="Run folder: also keep the JSON digest at this path (normally it is temporary)")
     ap.add_argument("--summary", action="store_true",
@@ -395,8 +441,8 @@ def main():
 
     if args.csv:
         try:
-            for path in write_csvs(view, html_page_csv_base(html_path)).values():
-                print(f"CSV summary: {path}")
+            path = write_csv(view, html_page_csv_base(html_path))
+            print(f"CSV report: {path}")
         except OSError as exc:
             # the page is already written; a CSV that is open in Excel must not mask that
             print(f"WARNING: HTML saved but a CSV summary could not be written "
@@ -856,7 +902,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
 
   // ---------- across-tables table view ----------
   h.push('<section class="section" id="commonSec"><div class="section-head"><div><h2>Across tables \u2014 full list</h2><p class="sub">Every pattern seen in the run. Hover a pattern name for its meaning.</p></div></div>' +
-    '<div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Risk</th><th>Pattern</th><th>Tables</th><th>Columns</th><th>Records</th><th>Example (s2 \u2192 s3)</th><th>Where</th></tr></thead><tbody>');
+    '<div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Risk</th><th>Pattern</th><th>Tables</th><th>Columns</th><th>Records</th><th>Example (Source \u2192 Target)</th><th>Where</th></tr></thead><tbody>');
   V.across.forEach(function (r) {
     var ex = r.example ? diffPair(r.example[0], r.example[1]) : null;
     // every table.column, one per line; a long list folds so the table stays scannable
@@ -875,9 +921,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   h.push('<section class="section" id="rulesSec"><h2>Rules</h2><p class="sub">Snapshot for this report: analysed ' + esc(V.generated_at.replace("T", " ")) +
     '; test cases captured ' + esc(V.page_built_at.replace("T", " ")) + '. The embedded case list stays with this report if the project tests change later.</p>');
   h.push('<p class="sub" style="margin-top:6px">' + fmt(V.rule_cases.length) + ' test cases across ' + fmt(V.glossary[0].rows.length) + ' distinct patterns.</p>');
-  h.push('<h3>Test cases captured for this report</h3><div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Case group</th><th>Column</th><th>s2</th><th>s3</th><th>Expected pattern</th></tr></thead><tbody>');
+  h.push('<h3>Test cases captured for this report</h3><div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Case group</th><th>Column</th><th>Source</th><th>Target</th><th>Expected pattern</th></tr></thead><tbody>');
   V.rule_cases.forEach(function (c) {
-    h.push('<tr><td>' + esc(c.group) + '</td><td><code>' + esc(c.column) + '</code></td><td class="mono">' + esc(c.s2) + '</td><td class="mono">' + esc(c.s3) + '</td><td><code>' + esc(c.expected) + '</code></td></tr>');
+    h.push('<tr><td>' + esc(c.group) + '</td><td><code>' + esc(c.column) + '</code></td><td class="mono">' + esc(c.source) + '</td><td class="mono">' + esc(c.target) + '</td><td><code>' + esc(c.expected) + '</code></td></tr>');
   });
   h.push('</tbody></table></div><h3>Pattern rules</h3>');
   h.push('<div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Pattern</th><th>What the rule means</th><th>Example</th><th>How it is decided</th></tr></thead><tbody>');
@@ -912,7 +958,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
     if (t.reasons.length) s.push('<ul class="reasons"><b style="margin-left:-16px">Why a manual check is needed</b>' + t.reasons.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul>");
     if (t.notes.length) s.push('<ul class="notes"><b style="margin-left:-16px">Warnings</b>' + t.notes.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul>");
 
-    s.push('<h3>Columns</h3><div class="tablewrap"><table class="data"><thead><tr><th>Column</th><th>Risk</th><th>Records</th><th>Patterns</th><th>Observations</th><th>Examples (s2 / s3)</th></tr></thead><tbody>');
+    s.push('<h3>Columns</h3><div class="tablewrap"><table class="data"><thead><tr><th>Column</th><th>Risk</th><th>Records</th><th>Patterns</th><th>Observations</th><th>Examples (Source / Target)</th></tr></thead><tbody>');
     t.columns.forEach(function (c) {
       s.push('<tr data-col="' + esc(c.column.toLowerCase()) + '" data-tier="' + c.tier + '"><td><b class="mono">' + esc(c.column) + "</b>" + (c.field_type === "text" ? '<div class="muted" style="font-size:11.5px">free text</div>' : "") + "</td>");
       s.push("<td>" + pill(c.tier) + '</td><td class="n">' + fmt(c.records) + "</td><td>");
@@ -921,9 +967,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
       });
       s.push('</td><td><ul class="obs">' + c.observations.map(function (o) { return "<li>" + esc(o) + "</li>"; }).join("") + '</ul></td><td><div class="ex">');
       c.examples.forEach(function (e) {
-        var d = diffPair(e.s2, e.s3);
+        var d = diffPair(e.source, e.target);
         var pk = Object.keys(e.pk).map(function (k) { return esc(k) + "=" + esc(e.pk[k]); }).join(", ");
-        s.push('<div class="ex-row"><span class="lbl">s2</span><span class="val">' + d[0] + '</span><span class="lbl">s3</span><span class="val">' + d[1] + "</span>" +
+        s.push('<div class="ex-row"><span class="lbl">Source</span><span class="val">' + d[0] + '</span><span class="lbl">Target</span><span class="val">' + d[1] + "</span>" +
           '<div class="ex-foot"><code>' + esc(e.pattern) + "</code>" + (pk ? "<span>" + pk + "</span>" : "") +
           (e.sql ? '<button data-sql="' + esc(e.sql) + '" data-tip="' + esc(esc(e.sql)) + '">Copy SELECT</button>' : "") + "</div></div>");
       });

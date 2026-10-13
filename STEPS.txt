@@ -233,8 +233,9 @@ OPTIONAL SETTINGS (add to the end of the command)
 
   Extra files - only if you ask for them:
   --csv
-        Also write three CSV summaries next to the page (_overview.csv,
-        _columns.csv, _across_tables.csv) for loading into other tools.
+        Also write one consolidated CSV next to the page (_report.csv) for
+        loading into other tools. It contains summary, column, common-issue,
+        and Rules/test-case rows with expected patterns and rule descriptions.
   --json "<file>.json"
         Also keep every count and example as a JSON file.
 
@@ -297,7 +298,7 @@ comes first.
      1,000+ columns - it carries on in the next row, marked "continued", with
      the same Risk and Pattern so the filter still shows all of it.)
 
-  8. "What the terms mean" (last sheet)
+  8. "What the terms mean" (glossary plus timestamped rule test cases for this report)
      Every label, in plain words, plus the exact test that produced it.
 
 The tool never guesses. When it cannot prove something, it says so.

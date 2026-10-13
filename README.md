@@ -80,7 +80,7 @@ Errors sheet. An empty result is never presented as a clean table.
 | `FORMAT/TYPE - check joins` | Proven same value, written differently - can still break exact joins. |
 | `WHITESPACE/CASE ONLY` | Only spacing or capitalisation differs. |
 
-The workbook's "What the terms mean" sheet documents all 41 patterns and the exact test behind each.
+The workbook's "What the terms mean" sheet documents the comparison patterns and exact tests, then appends a timestamped snapshot of the cases in `test_patterns.py` used for that report.
 
 ## Options
 
@@ -91,7 +91,7 @@ The workbook's "What the terms mean" sheet documents all 41 patterns and the exa
 | `--recon-table "schema.{table}"` | Table name used in the generated `SELECT` lookup queries |
 | `--examples N` | Examples kept per pattern (default 3) |
 | `--max-combos N` | Column combinations listed per sheet (default 500, `0` = all) |
-| `--csv` | Also write three CSV summaries next to the page |
+| `--csv` | Also write one consolidated CSV next to the page, with summary, column, common-issue, and timestamped Rules/test-case rows |
 | `--json <file>` | Also keep the raw JSON digest |
 
 `recon_analyzer.py` on its own is the engine and writes the Excel workbook only.

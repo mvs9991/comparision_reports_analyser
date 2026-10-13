@@ -1544,6 +1544,21 @@ def safe_cell(value):
     return text
 
 
+def report_wording(value):
+    """Translate internal side abbreviations in user-facing report prose."""
+    if not isinstance(value, str):
+        return value
+    value = value.replace("__s2", "__source").replace("__s3", "__target")
+    value = re.sub(r"(?<![\w])s2(?![\w])", "source", value, flags=re.I)
+    return re.sub(r"(?<![\w])s3(?![\w])", "target", value, flags=re.I)
+
+
+def report_pattern(value):
+    if not isinstance(value, str):
+        return value
+    return value.replace("_in_s2", "_in_source").replace("_in_s3", "_in_target")
+
+
 def arow(ws, values):
     """Append a row, sanitising every cell first."""
     ws.append([safe_cell(v) for v in values])
@@ -1627,38 +1642,38 @@ def write_table_sheet(ws, r, recon_table_template="{table}", max_combos=500):
     ])
     arow(ws, [f"Distinct mismatch_columns combinations: {r['distinct_combos']}"])
     arow(ws, [f"Primary key columns: {', '.join(r['pk_cols']) or '(none detected)'}"])
-    arow(ws, [f"Headline: {r['headline']}"])
+    arow(ws, [f"Headline: {report_wording(r['headline'])}"])
     if r.get("manual_check_reasons"):
-        arow(ws, ["MANUAL CHECK NEEDED: " + "; ".join(r["manual_check_reasons"])])
+        arow(ws, ["MANUAL CHECK NEEDED: " + "; ".join(report_wording(x) for x in r["manual_check_reasons"])])
         _mark_manual_cell = ws.cell(row=ws.max_row, column=1)
         _mark_manual_cell.fill = MANUAL_FILL
         _mark_manual_cell.font = MANUAL_FONT
     for note in r["notes"]:
-        arow(ws, [f"Note: {note}"])
+        arow(ws, [f"Note: {report_wording(note)}"])
     arow(ws, [])
 
     arow(ws, ["COLUMN-LEVEL SUMMARY (every mismatched column in this table)"])
     ws.cell(row=ws.max_row, column=1).font = SECTION_FONT
     header = [
-        "Risk", "Column", "Field Type", "Records", "What differs (s2 vs s3)",
+        "Risk", "Column", "Field Type", "Records", "What differs (Source vs Target)",
         "Pattern breakdown", "Consistency observations",
-        "Examples  s2 -> s3  (repr: quotes/spaces visible)",
+        "Examples  Source -> Target  (repr: quotes/spaces visible)",
         "Lookup query per example (same order)",
     ]
     arow(ws, header)
     style_header_row(ws, ws.max_row, len(header))
 
     for c in r["columns"]:
-        patterns = ", ".join(f"{p}={n}" for p, n in sorted(c["patterns"].items(), key=lambda kv: -kv[1]))
+        patterns = ", ".join(f"{report_pattern(p)}={n}" for p, n in sorted(c["patterns"].items(), key=lambda kv: -kv[1]))
         arow(ws, [
             c["risk"],
             c["column"],
             "text field" if c["is_text_field"] else "data field",
             c["records"],
-            " | ".join(dict.fromkeys(c["descriptions"])),
+            " | ".join(dict.fromkeys(report_wording(x) for x in c["descriptions"])),
             patterns,
-            "; ".join(c["observations"]),
-            "\n".join(f"[{p}] {s2!r} -> {s3!r}" for p, s2, s3, _ in c["examples"]),
+            "; ".join(report_wording(x) for x in c["observations"]),
+            "\n".join(f"[{report_pattern(p)}] {s2!r} -> {s3!r}" for p, s2, s3, _ in c["examples"]),
             "\n".join(
                 lookup_query(recon_table_template, r["table_name"], r["pk_cols"], pkv)
                 for _, _, _, pkv in c["examples"]
@@ -1676,7 +1691,7 @@ def write_table_sheet(ws, r, recon_table_template="{table}", max_combos=500):
     ws.cell(row=ws.max_row, column=1).font = SECTION_FONT
     header2 = [
         "Risk", "mismatch_columns combination", "# Cols", "Records",
-        "Per-column pattern", "Text fields", "Examples  s2 -> s3", "Sample PK values",
+        "Per-column pattern", "Text fields", "Examples  Source -> Target", "Sample PK values",
     ]
     arow(ws, header2)
     style_header_row(ws, ws.max_row, len(header2))
@@ -1695,7 +1710,7 @@ def write_table_sheet(ws, r, recon_table_template="{table}", max_combos=500):
             combo["combo"],
             combo["column_count"],
             combo["rows"],
-            "; ".join(b["text"] for b in combo["column_detail"]),
+            "; ".join(report_pattern(report_wording(b["text"])) for b in combo["column_detail"]),
             ", ".join(combo["text_fields"]) or "-",
             examples_str,
             pk_str,
@@ -1793,14 +1808,14 @@ def write_overview_sheet(ws, results, assessments):
         reasons = r.get("manual_check_reasons") or []
         arow(ws, [
             r["table_name"],
-            ("YES:\n- " + "\n- ".join(reasons)) if reasons else "no",
+            ("YES:\n- " + "\n- ".join(report_wording(x) for x in reasons)) if reasons else "no",
             r["total_sample_rows"],
             r["distinct_combos"],
             len(r["columns"]),
             dup_text,
-            r["headline"],
-            "\n".join(r["notes"]) if r["notes"] else "none",
-            assessments.get(r["table_name"]) or auto_assessment(r),
+            report_wording(r["headline"]),
+            "\n".join(report_wording(x) for x in r["notes"]) if r["notes"] else "none",
+            report_wording(assessments.get(r["table_name"]) or auto_assessment(r)),
         ])
         row_idx = ws.max_row
         if reasons:
@@ -1832,7 +1847,7 @@ def write_overview_sheet(ws, results, assessments):
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12)
         # left unwrapped so it spills across the empty cells beside it rather
         # than forming one very tall row
-        arow(ws, [overall])
+        arow(ws, [report_wording(overall)])
 
 
 def write_across_tables_sheet(ws, results):
@@ -1862,7 +1877,7 @@ def write_across_tables_sheet(ws, results):
                             break
 
     header = [
-        "Risk", "Pattern", "s2 format", "s3 format", "Tables affected",
+        "Risk", "Pattern", "Source format", "Target format", "Tables affected",
         "Columns affected", "Records", "Example", "Where (table.column)",
     ]
     arow(ws, header)
@@ -1881,7 +1896,7 @@ def write_across_tables_sheet(ws, results):
         for part, where in enumerate(chunks):
             first = part == 0
             arow(ws, [
-                pattern_risk(pattern), pattern, s2_shape, s3_shape,
+                pattern_risk(pattern), report_pattern(pattern), report_wording(s2_shape), report_wording(s3_shape),
                 len(g["tables"]) if first else "", len(g["columns"]) if first else "",
                 g["records"] if first else "",
                 (g["example"] or "") if first else f"(continued, part {part + 1} of {len(chunks)})",
@@ -2010,7 +2025,7 @@ def write_glossary_sheet(ws):
     arow(ws, ["Term", "What it means", "Example", "How it is decided (the exact test applied)"])
     style_header_row(ws, 1, 4)
     for term, meaning, example, test in GLOSSARY:
-        arow(ws, [term, meaning, example, test])
+        arow(ws, [report_pattern(report_wording(term)), report_wording(meaning), example, report_wording(test)])
         row = ws.max_row
         if not meaning:  # section heading
             ws.cell(row=row, column=1).font = Font(bold=True, size=12, color="1F4E78")
@@ -2018,6 +2033,37 @@ def write_glossary_sheet(ws):
             ws.cell(row=row, column=i).alignment = WRAP
     for i, w in enumerate([30, 76, 30, 80], start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
+
+    # Keep a timestamped copy of the project's rule test matrix in this run's
+    # workbook, just as the HTML Rules page does. This is intentionally read at
+    # report generation time so later edits to test_patterns.py do not rewrite
+    # the historical workbook.
+    from test_patterns import CASES
+    captured_at = datetime.now().isoformat(timespec="seconds")
+    arow(ws, [])
+    arow(ws, ["Rule test cases captured for this report", f"Captured: {captured_at}"])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True, size=12, color="1F4E78")
+    arow(ws, ["Case (group | column | expected pattern)", "What the rule means",
+              "Source -> Target example", "How the rule is decided (the exact test applied)"])
+    style_header_row(ws, ws.max_row, 4)
+    descriptions = {term: (meaning, test) for term, meaning, _, test in GLOSSARY if meaning}
+    for group, column, source, target, pattern in CASES:
+        meaning_test = descriptions.get(pattern)
+        if meaning_test is None and pattern.startswith(("punct_removed_in_s3:", "punct_added_in_s3:")):
+            prefix, char = pattern.split(":", 1)
+            template = descriptions.get(prefix + ":X", (pattern_desc(pattern), "Exact punctuation comparison."))
+            meaning_test = (template[0].replace("X", char), template[1].replace("X", char))
+        if meaning_test is None:
+            meaning_test = (pattern_desc(pattern), "See the comparison rule for this pattern.")
+        meaning, exact_test = meaning_test
+        arow(ws, [
+            f"{group} | {column} | {report_pattern(pattern)}",
+            report_wording(meaning),
+            f"{source} -> {target}",
+            report_wording(exact_test),
+        ])
+        for i in range(1, 5):
+            ws.cell(row=ws.max_row, column=i).alignment = WRAP
     ws.freeze_panes = "A2"
 
 
