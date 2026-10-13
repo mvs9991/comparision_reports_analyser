@@ -12,8 +12,7 @@ exports (a row-by-row comparison of two copies of the same table, `s2` = live/so
 column, *how* the two values differ: whitespace, date format, rounding, truncation,
 NULL handling, real value change, and so on.
 
-Output is exactly two files per run, named `report_summary_<run-folder-name>`:
-an Excel workbook (`.xlsx`) and a self-contained HTML page (`.html`) with the same numbers.
+Output includes an Excel workbook (`.xlsx`), a self-contained HTML dashboard (`.html`), and five linked focused HTML pages (`_attention`, `_summary`, `_columns`, `_common`, `_rules`). The Rules page embeds every `test_patterns.py` case and the matching pattern definitions as a timestamped snapshot.
 
 ## Commands
 

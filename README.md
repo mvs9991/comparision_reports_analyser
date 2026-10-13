@@ -17,12 +17,13 @@ Every statement is computed by exact string, decimal or date comparison. The too
 
 ## What you get
 
-One run produces exactly two files, named after the run folder:
+One run produces a workbook and an HTML dashboard, named after the run folder. The dashboard links to five focused HTML pages:
 
 | File | Contents |
 |---|---|
 | `report_summary_<run>.xlsx` | Overview, Errors, Across Tables, one sheet per table, and a glossary |
-| `report_summary_<run>.html` | The same findings as an offline, single-file web page: filters, charts, highlighted differences, one-click lookup queries, print-friendly |
+| `report_summary_<run>.html` | Offline dashboard with risk totals and links to the focused pages |
+| `report_summary_<run>_{attention,summary,columns,common,rules}.html` | Focused pages; Rules embeds the full `test_patterns.py` case and pattern snapshot with capture time |
 
 ## Quick start
 

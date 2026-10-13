@@ -1,14 +1,18 @@
 RECON MISMATCH ANALYZER - HOW TO RUN IT
 =======================================
 
-Reads your recon mismatch CSV exports and writes TWO files, side by side, both
-named after the run folder:
+Reads your recon mismatch CSV exports and writes the Excel workbook, an HTML
+dashboard, and five linked HTML section pages, named after the run folder:
 
   report_summary_<folder>.xlsx   the Excel summary workbook, with all its sheets
                                  (Overview, Errors, Across Tables, one sheet per
                                  table, What the terms mean)
-  report_summary_<folder>.html   the same findings as a web page - opens in any
-                                 browser, no internet needed
+  report_summary_<folder>.html   offline dashboard linking to the section pages
+  report_summary_<folder>_attention.html   attention items
+  report_summary_<folder>_summary.html     tables and patterns, worst first
+  report_summary_<folder>_columns.html     table/column detail and filters
+  report_summary_<folder>_common.html      full cross-table issue list
+  report_summary_<folder>_rules.html       timestamped test_patterns.py case snapshot
 
 Nothing else is left behind. All commands below are for Windows Command Prompt
 (cmd). Copy them as-is, changing only the paths shown in <angle brackets>.
@@ -299,21 +303,15 @@ comes first.
 The tool never guesses. When it cannot prove something, it says so.
 
 
-THE WEB PAGE (report_summary_<folder>.html)
-  The same findings as the workbook, easier to scan. Opens in any browser,
-  works offline, and can be emailed as a single file.
-    - Top tiles: tables analysed, needing a manual check, not analysed,
-      tables with real value differences.
-    - "Needs your attention": NOT ANALYSED tables first (with the reason), then
-      manual-check tables with their reasons.
-    - "Tables, worst first" and "Patterns across tables" charts - hover for
-      details, click a table to jump to it.
-    - Filter bar: search a table or column name, tick/untick risk levels,
-      "Manual check only".
-    - Table detail: click a table to open it. Each example shows s2 and s3 with
-      the changed characters highlighted (a dot marks a space) and a
-      "Copy SELECT" button for the lookup query.
-    - "What the terms mean" at the bottom - the same glossary as the workbook.
+THE HTML REPORT PAGES
+  The dashboard (report_summary_<folder>.html) shows the overview tiles, risk
+  boxes, and links to focused pages. All pages open offline in a browser.
+    - _attention.html: unable-to-recon tables and manual-check tables.
+    - _summary.html: "Tables, worst first" and "Patterns across tables" charts.
+    - _columns.html: table and column details, examples, and risk filters.
+    - _common.html: the full list of issues seen across tables.
+    - _rules.html: every test_patterns.py case (inputs and expected pattern),
+      plus the pattern definitions, captured with a timestamp for this report.
   Ctrl+P prints it (or saves as PDF) with every table expanded.
   Large runs: each table shows up to 200 combinations; the workbook lists
   more (500 by default, or all with --max-combos 0).
@@ -376,7 +374,7 @@ PART 5 - THE CLAUDE CODE SKILL WAY (optional)
 
 If you use Claude Code, it can run Part 2 for you and tell you what needs
 attention. It runs exactly the same command as Part 2 Step 4 (with --summary),
-so you get the same two files and the same numbers.
+so you get the same report files and numbers.
 
 ONE-TIME SETUP (on each laptop)
   1. Part 1 Steps 1-5 must be done (Python + packages).
@@ -419,13 +417,13 @@ USING IT
        /recon-summary D:\recon_exports\20260907 --recon-table "myschema.{table}"
 
      (the second path is the folder the reports go in; they are still named
-      report_summary_<run-folder-name>.xlsx and .html)
+      report_summary_<run-folder-name> plus its five HTML section pages)
 
      You can also just ask in plain words, e.g.
        "summarise the recon reports in D:\recon_exports\20260907"
 
   3. Claude runs the tool, opens the web page, and replies with:
-       - where the two files are
+       - where the dashboard, five section pages, and workbook are
        - totals: tables analysed / need manual check / not analysed
        - every NOT ANALYSED table and why (the Errors sheet)
        - each manual-check table with its reasons

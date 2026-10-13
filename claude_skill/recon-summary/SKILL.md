@@ -6,9 +6,11 @@ argument-hint: <run-folder> [output-folder] [--recon-table "schema.{table}"] [--
 
 # Recon summary
 
-Runs the Recon Mismatch Analyzer on a run folder. The output is exactly TWO
-files - the Excel workbook and the HTML page. Do not create any other report
-files, and do not modify the tool's scripts or any input file.
+Runs the Recon Mismatch Analyzer on a run folder. It creates the Excel workbook,
+the HTML dashboard, and five linked HTML section pages (attention, summary,
+columns, common issues, and a timestamped snapshot of test cases and comparison
+rules). Do not create any
+other report files, and do not modify the tool's scripts or any input file.
 
 Arguments given: `$ARGUMENTS`
 
@@ -54,7 +56,8 @@ the HTML page is built from the same results. Result:
 | File | What it is |
 |---|---|
 | `report_summary_<run>.xlsx` | the workbook: Overview, Errors, Across Tables, one sheet per table, What the terms mean |
-| `report_summary_<run>.html` | the same findings as a web page - opens offline in any browser |
+| `report_summary_<run>.html` | offline dashboard linking to the focused sections |
+| `report_summary_<run>_{attention,summary,columns,common,rules}.html` | focused views; Rules includes the timestamped `test_patterns.py` case snapshot |
 
 A large run can take minutes (STEPS.txt: ~1 minute for 200 tables) - use a long
 timeout. If it fails, show the error line and match it against STEPS.txt
@@ -67,7 +70,7 @@ Use the `SUMMARY` block the command printed (from `--summary`) - do not open the
 workbook or re-analyse anything. Reply briefly, in this order, using only what
 it says:
 
-1. The two file paths - the HTML page first, then the xlsx.
+1. The dashboard HTML path, the five focused HTML page paths, then the xlsx path.
 2. One line of totals: tables analysed, need manual check, not analysed,
    analysed with warnings.
 3. **Not analysed** tables with their reason (these are on the Errors sheet) -

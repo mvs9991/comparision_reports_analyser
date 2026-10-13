@@ -1,6 +1,6 @@
 """Recon Mismatch Analyzer - Excel workbook + HTML page in one run.
 
-Output of a run: TWO files, side by side, named after the run folder:
+Output of a run: a workbook, a dashboard, and five linked HTML section pages:
     report_summary_<folder>.xlsx   the workbook, with all its sheets
     report_summary_<folder>.html   the same findings as a web page (opens offline)
 
@@ -146,12 +146,38 @@ def build_view(digest, recon_table="{table}"):
         key=lambda r: (tier_rank[r["tier"]], -r["tables"], -r["records"], r["pattern"]),
     )
 
-    glossary = []
-    for term, meaning, example, test in ra.GLOSSARY:
-        if not meaning:
-            glossary.append({"section": term, "rows": []})
-        elif glossary:
-            glossary[-1]["rows"].append({"term": term, "meaning": meaning, "example": example, "test": test})
+    # The Rules page documents every expected pattern covered by the project's
+    # comparison cases, whether or not that pattern appeared in this run.
+    from test_patterns import CASES
+    rule_cases = [
+        {"group": group, "column": col, "s2": s2, "s3": s3, "expected": pattern}
+        for group, col, s2, s3, pattern in CASES
+    ]
+    tested = {}
+    for _, col, s2, s3, pattern in CASES:
+        tested.setdefault(pattern, {"column": col, "s2": s2, "s3": s3})
+    glossary_by_term = {
+        term: {"term": term, "meaning": meaning, "example": example, "test": test}
+        for term, meaning, example, test in ra.GLOSSARY if meaning
+    }
+    rules = []
+    for pattern, case in tested.items():
+        row = glossary_by_term.get(pattern)
+        if row is None and pattern.startswith(("punct_removed_in_s3:", "punct_added_in_s3:")):
+            prefix, char = pattern.split(":", 1)
+            template = glossary_by_term.get(prefix + ":X", {})
+            row = {
+                "term": pattern,
+                "meaning": template.get("meaning", ra.pattern_desc(pattern)).replace("X", char),
+                "test": template.get("test", "Exact punctuation comparison." ).replace("X", char),
+            }
+        if row is None:
+            risk, meaning = ra.pattern_info(pattern)
+            row = {"term": pattern, "meaning": meaning, "test": "See the comparison rule for this pattern."}
+        row = dict(row)
+        row["example"] = f"{case['s2']} → {case['s3']}"
+        rules.append(row)
+    glossary = [{"section": "Patterns tested by test_patterns.py", "rows": rules}]
 
     return {
         "run_folder": digest.get("run_folder", ""),
@@ -163,6 +189,7 @@ def build_view(digest, recon_table="{table}"):
         "errors": digest.get("errors", []),
         "across": across_rows,
         "glossary": glossary,
+        "rule_cases": rule_cases,
         "max_combos_in_page": MAX_COMBOS_IN_PAGE,
     }
 
@@ -244,7 +271,7 @@ def write_csvs(view, base_path):
     return paths
 
 
-def render_html(view, title):
+def render_html(view, title, page="home"):
     data = json.dumps(view, ensure_ascii=False)
     # the data sits inside a <script> element. Escaping only "</" was not enough:
     # an exported value holding "<!--" and "<script" switches the browser into a
@@ -253,6 +280,7 @@ def render_html(view, title):
     data = data.replace("<", "\\u003c")
     return (TEMPLATE
             .replace("__TITLE__", _html_escape(title))
+            .replace("__PAGE__", _html_escape(page))
             .replace("/*__DATA__*/null", data))
 
 
@@ -266,11 +294,19 @@ def write_html(digest_path, html_path, recon_table="{table}", title=None):
         digest = json.load(fh)
     view = build_view(digest, recon_table)
     run_name = os.path.basename(os.path.normpath(view["run_folder"])) or "recon run"
-    html = render_html(view, title or f"Recon summary - {run_name}")
+    page_title = title or f"Recon summary - {run_name}"
+    html = render_html(view, page_title)
     out_dir = os.path.dirname(os.path.abspath(html_path))
     os.makedirs(out_dir, exist_ok=True)
     with open(html_path, "w", encoding="utf-8") as fh:
         fh.write(html)
+    base, ext = os.path.splitext(os.path.abspath(html_path))
+    for page, label in (("attention", "Needs your attention"), ("summary", "Summary"),
+                        ("columns", "Columns"), ("common", "Common Issues"),
+                        ("rules", "Rules")):
+        page_path = base + "_" + page + ext
+        with open(page_path, "w", encoding="utf-8") as fh:
+            fh.write(render_html(view, f"{label} - {run_name}", page))
     return view
 
 
@@ -351,6 +387,11 @@ def main():
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
     print(f"HTML report: {os.path.abspath(html_path)}")
+    html_base, html_ext = os.path.splitext(os.path.abspath(html_path))
+    print("HTML section pages: " + ", ".join(
+        html_base + "_" + page + html_ext
+        for page in ("attention", "summary", "columns", "common", "rules")
+    ))
 
     if args.csv:
         try:
@@ -489,6 +530,21 @@ code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; f
 .tile .h { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .tile.alert { border-color: color-mix(in srgb, var(--t-real) 45%, transparent); }
 .tile.alert .v { color: var(--t-real); }
+.navcards { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr)); gap: 10px; margin-top: 16px; }
+.navcard { display: block; padding: 12px 14px; text-decoration: none; color: inherit; font-weight: 650; }
+.navcard:hover, .navcard:focus-visible { background: var(--accent-wash); outline: 2px solid var(--accent); }
+.risk-link { display:flex; align-items:center; gap:8px; text-decoration:none; color:inherit; padding:7px 10px; }
+.risk-link b { font-variant-numeric:tabular-nums; }
+.strip-values { align-items:stretch; gap:8px; }
+.strip-values .risk-link { font-size:13px; color:var(--ink-2); }
+.strip-values .risk-link b { color:var(--ink); font-size:15px; }
+body[data-page="attention"] #riskSec, body[data-page="attention"] #summarySec, body[data-page="attention"] #columnsSec, body[data-page="attention"] #commonSec, body[data-page="attention"] #rulesSec,
+body[data-page="summary"] #riskSec, body[data-page="summary"] #attentionSec, body[data-page="summary"] #columnsSec, body[data-page="summary"] #commonSec, body[data-page="summary"] #rulesSec,
+body[data-page="columns"] #riskSec, body[data-page="columns"] #attentionSec, body[data-page="columns"] #summarySec, body[data-page="columns"] #commonSec, body[data-page="columns"] #rulesSec,
+body[data-page="common"] #riskSec, body[data-page="common"] #attentionSec, body[data-page="common"] #summarySec, body[data-page="common"] #columnsSec, body[data-page="common"] #rulesSec,
+body[data-page="rules"] #riskSec, body[data-page="rules"] #attentionSec, body[data-page="rules"] #summarySec, body[data-page="rules"] #columnsSec, body[data-page="rules"] #commonSec { display:none !important; }
+body[data-page="home"] #attentionSec, body[data-page="home"] #summarySec, body[data-page="home"] #columnsSec, body[data-page="home"] #commonSec, body[data-page="home"] #rulesSec { display:none !important; }
+body[data-page]:not([data-page="home"]) .tiles { display:none; }
 
 /* risk pills and swatches */
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
@@ -622,7 +678,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
 }
 </style>
 </head>
-<body>
+<body data-page="__PAGE__">
 <div class="wrap" id="app"></div>
 <div id="tip" role="tooltip"></div>
 <noscript><p style="padding:20px">This report needs JavaScript to display. The same content is in the Excel workbook.</p></noscript>
@@ -632,8 +688,14 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   "use strict";
   var V = JSON.parse(document.getElementById("data").textContent);
   var TIERS = V.tiers, TIER = {};
-  TIERS.forEach(function (t) { TIER[t.id] = t; });
+  var htmlLabels = {real:"Needs Review", text:"Flagged for minor differences", check:"Format Diffs", low:"Whitespace/case diffs"};
+  TIERS.forEach(function (t) { if (htmlLabels[t.id]) t.label = htmlLabels[t.id]; TIER[t.id] = t; });
   var app = document.getElementById("app");
+  var pageExt = (window.location.pathname.match(/\.html?$/i) || [".html"])[0];
+  var pageBase = window.location.pathname.replace(/\.html?$/i, "");
+  var activePage = document.body.dataset.page;
+  if (activePage !== "home") pageBase = pageBase.slice(0, -(activePage.length + 1));
+  function pageLink(page) { return page === "home" ? pageBase + pageExt : pageBase + "_" + page + pageExt; }
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -725,17 +787,21 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   h.push('<div class="tiles">');
   h.push(tile("Tables analysed", fmt(tables.length), plural(totalRows, "sample row")));
   h.push(tile("Need a manual check", fmt(manual.length), "of " + fmt(tables.length) + " tables", manual.length > 0));
-  h.push(tile("Not analysed", fmt(errors.length), errors.length ? "never read these as clean" : "every table was read", errors.length > 0));
-  h.push(tile("Tables with real value diffs", fmt(realTables), plural(colTotals.real, "column") + " affected", realTables > 0));
+  h.push(tile("Unable to Recon", fmt(errors.length), errors.length ? "table(s) could not be compared" : "all tables were analysed", errors.length > 0));
+  h.push(tile("Needs Review", fmt(realTables), plural(colTotals.real, "column") + " affected", realTables > 0));
   h.push(tile("Mismatched columns", fmt(totalCols), "across all tables"));
   h.push("</div>");
+  h.push('<nav class="navcards" aria-label="Report sections">' +
+    [['home','Dashboard'],['attention','Needs your attention'],['summary','Summary'],['columns','Columns'],['common','Common Issues'],['rules','Rules']].map(function (x) {
+      return '<a class="card navcard" href="' + esc(pageLink(x[0])) + '">' + esc(x[1]) + ' <span aria-hidden="true">\u2192</span></a>';
+    }).join('') + '</nav>');
   function tile(k, v, hint, alert) {
     return '<div class="card tile' + (alert ? " alert" : "") + '"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div><div class="h">' + esc(hint) + "</div></div>";
   }
 
   // ---------- risk mix ----------
-  h.push('<section class="section card"><div class="section-head"><div><h2>Mismatched columns by risk</h2>' +
-    '<p class="sub">Each column is ranked by its worst record. Read left to right: the most urgent is first.</p></div></div>');
+  h.push('<section class="section card" id="riskSec"><div class="section-head"><div><h2>Mismatched columns by risk</h2>' +
+    '<p class="sub">Each column is ranked by its worst record.</p></div></div>');
   if (totalCols) {
     h.push('<div class="strip" role="img" aria-label="Columns by risk">');
     TIERS.forEach(function (t) {
@@ -744,7 +810,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
     });
     h.push('</div><div class="strip-values">');
     TIERS.forEach(function (t) {
-      h.push("<div>" + sw(t.id) + "<b>" + fmt(colTotals[t.id]) + "</b>" + esc(t.label) + "</div>");
+      h.push('<a class="card risk-link" href="' + esc(pageLink("columns")) + '#tier-' + t.id + '">' + sw(t.id) + "<b>" + fmt(colTotals[t.id]) + "</b>" + esc(t.label) + "</a>");
     });
     h.push("</div>");
   } else {
@@ -753,21 +819,22 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   h.push("</section>");
 
   // ---------- attention list ----------
-  if (errors.length || manual.length) {
-    h.push('<section class="section"><div class="section-head"><div><h2>Needs your attention</h2>' +
-      '<p class="sub">Not analysed first, then tables where something measurable looks odd.</p></div></div><div class="attn">');
+  {
+    h.push('<section class="section" id="attentionSec"><div class="section-head"><div><h2>Needs your attention</h2>' +
+      '<p class="sub">Unable to Recon tables first, then tables where something measurable looks odd.</p></div></div><div class="attn">');
     errors.forEach(function (e) {
-      h.push('<div class="attn-item err"><span class="tag">Not analysed</span><div><b>' + esc(e.table) + "</b><div class=\"sub\">" + esc(e.error) + "</div></div></div>");
+      h.push('<div class="attn-item err"><span class="tag">Unable to Recon</span><div><b>' + esc(e.table) + "</b><div class=\"sub\">" + esc(e.error) + "</div></div></div>");
     });
     manual.forEach(function (t) {
       h.push('<div class="attn-item"><span class="tag">Manual check</span><div><a href="#' + t.id + '" data-open="' + t.id + '">' + esc(t.table) + "</a> " + pill(t.worst) +
         "<ul>" + t.reasons.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul></div></div>");
     });
+    if (!errors.length && !manual.length) h.push('<p class="empty-state">No tables need attention in this report.</p>');
     h.push("</div></section>");
   }
 
   // ---------- two charts ----------
-  h.push('<div class="grid2 section">');
+  h.push('<div class="grid2 section" id="summarySec">');
   h.push('<section class="card"><h2>Tables, worst first</h2><p class="sub">Mismatched columns per table, split by risk. Click a row to open it.</p>' +
     '<div class="legend" style="margin-top:10px">' + TIERS.map(function (t) { return "<span>" + sw(t.id) + esc(t.label) + "</span>"; }).join("") + "</div>" +
     '<div class="hbars" id="tableBars"></div><div class="axis-note"><span class="flag" style="color:var(--t-real);font-weight:700">!</span> = manual check needed. Number = mismatched columns.</div>' +
@@ -779,16 +846,16 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   h.push("</div>");
 
   // ---------- filters + per-table detail ----------
-  h.push('<div class="filters" role="search">' +
+  h.push('<div id="columnsSec"><h2>Columns</h2><p class="sub">Search and filter differences by table, column, and category.</p><div class="filters" role="search">' +
     '<input type="search" id="q" placeholder="Filter tables or columns\u2026" aria-label="Filter tables or columns">' +
     '<label class="chk"><input type="checkbox" id="onlyManual"> Manual check only</label>' +
-    TIERS.map(function (t) { return '<label class="chk"><input type="checkbox" class="tierf" value="' + t.id + '" checked>' + sw(t.id) + esc(t.label) + "</label>"; }).join("") +
+    TIERS.map(function (t) { return '<label class="chk"><input type="checkbox" class="tierf" id="tier-' + t.id + '" value="' + t.id + '" checked>' + sw(t.id) + esc(t.label) + "</label>"; }).join("") +
     '<button id="expandAll">Expand all</button><button id="collapseAll">Collapse all</button>' +
     '<span class="count" id="count"></span></div>');
-  h.push('<section class="section" id="tablesSec"><h2>Table detail</h2><p class="sub">Columns worst first, with examples. The changed part of each value is highlighted; \u00b7 marks a space.</p><div id="tableList"></div></section>');
+  h.push('<section class="section" id="tablesSec"><h2>Table and column detail</h2><p class="sub">Columns worst first, with examples. The changed part of each value is highlighted; \u00b7 marks a space.</p><div id="tableList"></div></section></div>');
 
   // ---------- across-tables table view ----------
-  h.push('<section class="section"><div class="section-head"><div><h2>Across tables \u2014 full list</h2><p class="sub">Every pattern seen in the run. Hover a pattern name for its meaning.</p></div></div>' +
+  h.push('<section class="section" id="commonSec"><div class="section-head"><div><h2>Across tables \u2014 full list</h2><p class="sub">Every pattern seen in the run. Hover a pattern name for its meaning.</p></div></div>' +
     '<div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Risk</th><th>Pattern</th><th>Tables</th><th>Columns</th><th>Records</th><th>Example (s2 \u2192 s3)</th><th>Where</th></tr></thead><tbody>');
   V.across.forEach(function (r) {
     var ex = r.example ? diffPair(r.example[0], r.example[1]) : null;
@@ -805,18 +872,21 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   h.push("</tbody></table></div></section>");
 
   // ---------- glossary ----------
-  h.push('<section class="section"><details class="tbl"><summary><div class="tname"><span class="chev">\u25b6</span>What the terms mean</div></summary><div class="tbody">');
+  h.push('<section class="section" id="rulesSec"><h2>Rules</h2><p class="sub">Snapshot for this report: analysed ' + esc(V.generated_at.replace("T", " ")) +
+    '; test cases captured ' + esc(V.page_built_at.replace("T", " ")) + '. The embedded case list stays with this report if the project tests change later.</p>');
+  h.push('<p class="sub" style="margin-top:6px">' + fmt(V.rule_cases.length) + ' test cases across ' + fmt(V.glossary[0].rows.length) + ' distinct patterns.</p>');
+  h.push('<h3>Test cases captured for this report</h3><div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Case group</th><th>Column</th><th>s2</th><th>s3</th><th>Expected pattern</th></tr></thead><tbody>');
+  V.rule_cases.forEach(function (c) {
+    h.push('<tr><td>' + esc(c.group) + '</td><td><code>' + esc(c.column) + '</code></td><td class="mono">' + esc(c.s2) + '</td><td class="mono">' + esc(c.s3) + '</td><td><code>' + esc(c.expected) + '</code></td></tr>');
+  });
+  h.push('</tbody></table></div><h3>Pattern rules</h3>');
+  h.push('<div class="tablewrap card" style="padding:0"><table class="data"><thead><tr><th>Pattern</th><th>What the rule means</th><th>Example</th><th>How it is decided</th></tr></thead><tbody>');
   V.glossary.forEach(function (g) {
-    h.push('<div class="gloss-sec"><h3>' + esc(g.section) + '</h3><div class="tablewrap"><table class="data"><thead><tr><th>Term</th><th>What it means</th><th>Example</th><th>How it is decided</th></tr></thead><tbody>');
     g.rows.forEach(function (r) {
       h.push('<tr><td><code>' + esc(r.term) + "</code></td><td>" + esc(r.meaning) + '</td><td class="mono">' + esc(r.example) + '</td><td class="muted">' + esc(r.test) + "</td></tr>");
     });
-    h.push("</tbody></table></div></div>");
   });
-  h.push("</div></details></section>");
-  h.push("<footer>Generated by recon_html_report.py from the recon_analyzer.py JSON digest \u00b7 page built " + esc(V.page_built_at.replace("T", " ")) +
-    ". The Excel workbook from the same run is the complete record.</footer>");
-
+  h.push("</tbody></table></div></section>");
   app.innerHTML = h.join("");
 
   // ---------- per-table detail rendering ----------
@@ -1002,6 +1072,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); }
   });
   document.addEventListener("scroll", hideTip, true);
 
+  if (/^#tier-/.test(location.hash)) {
+    var selectedTier = location.hash.slice(6);
+    document.querySelectorAll(".tierf").forEach(function (c) { c.checked = c.value === selectedTier; });
+  }
   applyFilters();
   patternBars();
   if (location.hash) { var d0 = document.getElementById(location.hash.slice(1)); if (d0 && d0.tagName === "DETAILS") d0.open = true; }
